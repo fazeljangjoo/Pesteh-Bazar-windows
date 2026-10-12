@@ -1,0 +1,173 @@
+name: Build APK
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Check signing secrets (fails in seconds with a clear reason)
+        run: |
+          MISSING=""
+          for v in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!v}" ]; then echo "::error::Secret $v is empty or missing"; MISSING=1; fi
+          done
+          [ -z "$MISSING" ] || exit 1
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          echo "keystore file size: $(stat -c%s "$RUNNER_TEMP/release.jks") bytes"
+          echo "keystore file sha256: $(sha256sum "$RUNNER_TEMP/release.jks" | cut -d' ' -f1)"
+          echo "store password length: ${#ANDROID_KEYSTORE_PASSWORD}"
+          echo "key password length: ${#ANDROID_KEY_PASSWORD}"
+          if printf '%s' "$ANDROID_KEYSTORE_PASSWORD" | LC_ALL=C grep -qP '[^\x21-\x7E]'; then
+            echo "::warning::store password contains a space, newline or non-English character"
+          fi
+          keytool -list -keystore "$RUNNER_TEMP/release.jks" -storepass:env ANDROID_KEYSTORE_PASSWORD -alias "$ANDROID_KEY_ALIAS"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Generate Android files
+        run: flutter create --platforms=android --project-name pesteh_bazar --org com.pestehbazar .
+
+      - name: Add app permissions
+        run: |
+          python3 - <<'PYEOF'
+          path = "android/app/src/main/AndroidManifest.xml"
+          with open(path, encoding="utf-8") as f:
+              content = f.read()
+          names = [
+              "android.permission.INTERNET",
+              "android.permission.ACCESS_NETWORK_STATE",
+              "android.permission.POST_NOTIFICATIONS",
+              "android.permission.SCHEDULE_EXACT_ALARM",
+              "android.permission.USE_EXACT_ALARM",
+              "android.permission.RECEIVE_BOOT_COMPLETED",
+          ]
+          perms = ""
+          for n in names:
+              if n not in content:  # idempotent: never duplicate
+                  perms += '    <uses-permission android:name="%s"/>\n' % n
+          assert "<application" in content, "manifest has no <application>"
+          content = content.replace('<application', perms + '    <application', 1)
+          with open(path, "w", encoding="utf-8") as f:
+              f.write(content)
+          PYEOF
+
+      - name: Enable core library desugaring
+        run: |
+          python3 - <<'PYEOF'
+          import os
+
+          kts = "android/app/build.gradle.kts"
+          groovy = "android/app/build.gradle"
+          desugar_lib = "com.android.tools:desugar_jdk_libs:2.1.4"
+
+          if os.path.exists(kts):
+              path = kts
+              with open(path, encoding="utf-8") as f:
+                  content = f.read()
+              if "isCoreLibraryDesugaringEnabled" not in content:
+                  if "compileOptions {" in content:
+                      content = content.replace(
+                          "compileOptions {",
+                          "compileOptions {\n        isCoreLibraryDesugaringEnabled = true",
+                          1,
+                      )
+                  else:
+                      content = content.replace(
+                          "android {",
+                          "android {\n    compileOptions {\n        isCoreLibraryDesugaringEnabled = true\n    }",
+                          1,
+                      )
+              if "coreLibraryDesugaring(" not in content:
+                  content += f'\n\ndependencies {{\n    coreLibraryDesugaring("{desugar_lib}")\n}}\n'
+              with open(path, "w", encoding="utf-8") as f:
+                  f.write(content)
+          elif os.path.exists(groovy):
+              path = groovy
+              with open(path, encoding="utf-8") as f:
+                  content = f.read()
+              if "coreLibraryDesugaringEnabled" not in content:
+                  if "compileOptions {" in content:
+                      content = content.replace(
+                          "compileOptions {",
+                          "compileOptions {\n        coreLibraryDesugaringEnabled true",
+                          1,
+                      )
+                  else:
+                      content = content.replace(
+                          "android {",
+                          "android {\n    compileOptions {\n        coreLibraryDesugaringEnabled true\n    }",
+                          1,
+                      )
+              if "coreLibraryDesugaring " not in content:
+                  content += f"\n\ndependencies {{\n    coreLibraryDesugaring '{desugar_lib}'\n}}\n"
+              with open(path, "w", encoding="utf-8") as f:
+                  f.write(content)
+          PYEOF
+
+      - name: Verify the manifest declares INTERNET
+        run: grep -q "android.permission.INTERNET" android/app/src/main/AndroidManifest.xml
+
+      - run: flutter pub get
+
+      - name: Configure release signing (key comes from GitHub Secrets)
+        run: |
+          python3 - <<'PYEOF'
+          path = "android/app/build.gradle.kts"
+          with open(path, encoding="utf-8") as f:
+              content = f.read()
+          block = "\n".join([
+              "    signingConfigs {",
+              "        create(\"release\") {",
+              "            storeFile = file(System.getenv(\"KEYSTORE_PATH\"))",
+              "            storePassword = System.getenv(\"ANDROID_KEYSTORE_PASSWORD\")",
+              "            keyAlias = System.getenv(\"ANDROID_KEY_ALIAS\")",
+              "            keyPassword = System.getenv(\"ANDROID_KEY_PASSWORD\")",
+              "        }",
+              "    }",
+              "",
+              "    buildTypes {",
+          ])
+          if 'create("release")' not in content:
+              assert "    buildTypes {" in content, "buildTypes block not found"
+              content = content.replace("    buildTypes {", block, 1)
+          content = content.replace('signingConfigs.getByName("debug")', 'signingConfigs.getByName("release")')
+          assert 'signingConfigs.getByName("release")' in content, "release signing not wired"
+          with open(path, "w", encoding="utf-8") as f:
+              f.write(content)
+          PYEOF
+
+      - run: flutter build apk --release --obfuscate --split-debug-info=build/debug-symbols
+
+      - name: Show APK signing certificate (SHA-256 must be identical on every build)
+        run: |
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n1)
+          "$APKSIGNER" verify --print-certs build/app/outputs/flutter-apk/app-release.apk | grep -E "SHA-256|DN"
+
+      - name: Verify INTERNET permission is inside the built APK
+        run: |
+          AAPT=$(ls "$ANDROID_HOME"/build-tools/*/aapt | sort -V | tail -n1)
+          "$AAPT" dump permissions build/app/outputs/flutter-apk/app-release.apk | tee perms.txt
+          grep -q "android.permission.INTERNET" perms.txt || { echo "::error::INTERNET permission is missing from the APK"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pesteh-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
