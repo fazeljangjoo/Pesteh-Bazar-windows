@@ -45,6 +45,15 @@ jobs:
           # آیکون برنامه
           shutil.copyfile('windows_assets/app_icon.ico', 'windows/runner/resources/app_icon.ico')
 
+      - name: Start the window maximized (full screen of the work area)
+        shell: python
+        run: |
+          path = 'windows/runner/win32_window.cpp'
+          s = open(path, encoding='utf-8').read()
+          assert 'SW_SHOWNORMAL' in s, 'SW_SHOWNORMAL not found in win32_window.cpp'
+          s = s.replace('SW_SHOWNORMAL', 'SW_SHOWMAXIMIZED', 1)
+          open(path, 'w', encoding='utf-8').write(s)
+
       - name: Enable encrypted database engine (SQLite3 Multiple Ciphers) for Windows
         shell: python
         run: |
