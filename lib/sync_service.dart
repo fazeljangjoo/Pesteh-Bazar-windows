@@ -139,7 +139,8 @@ class SyncService {
     _emit(pending: p, failed: f);
     final due = DateTime.now().difference(_lastPullTry) >= _pullEvery;
     final settled = DateTime.now().difference(_lastActivity) >= _settle;
-    if (p == 0 && f == 0 && (pull == true || (pull == null && due && settled))) {
+    // تا وقتی فرم/صفحهٔ ثبتی باز است دریافت از سرور انجام نمی‌شود (شناسه‌ها زیر دست کاربر عوض نشوند)
+    if (p == 0 && f == 0 && !AppDb.I.isEditing && (pull == true || (pull == null && due && settled))) {
       _lastPullTry = DateTime.now();
       await _pull(cred.$1, cred.$2);
     }

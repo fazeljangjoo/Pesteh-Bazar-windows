@@ -45,6 +45,9 @@ class _DuesScreenState extends State<DuesScreen> {
         case 'receipt_cheque_inst':
           await NotifyService.I.cancelReceiptChequeRow(i.id);
           break;
+        case 'loan_dues':
+          await NotifyService.I.cancelLoanRow(i.id);
+          break;
       }
     } catch (_) {}
   }
@@ -55,9 +58,10 @@ class _DuesScreenState extends State<DuesScreen> {
     final ok = await confirm(
         context, '${i.kind} به مبلغ ${faNum(i.amount, dec: 0)} تومان$who «$verb شد» ثبت شود؟');
     if (!ok) return;
-    await AppDb.I.setPaid(i.table, i.id, true);
+    final done = await saveConfirmed(context, () => AppDb.I.setPaid(i.table, i.id, true),
+        successMsg: '$verb با موفقیت ثبت شد');
+    if (!done) return;
     await _cancelNotification(i);
-    if (mounted) snack(context, '$verb ثبت شد');
   }
 
   @override

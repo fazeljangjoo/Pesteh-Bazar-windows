@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'db.dart';
 import 'license_service.dart';
+import 'pdf_output.dart';
 import 'pdf_service.dart';
 import 'utils.dart';
 import 'widgets.dart';
@@ -82,7 +83,7 @@ class InvoiceService {
         usdRate: rate,
         note: p['note'] as String?,
       );
-      await PdfService.share(file);
+      await PdfOutput.show(context, file);
     } catch (e) {
       if (context.mounted) snack(context, 'خطا در ساخت فاکتور: $e');
     }
@@ -121,7 +122,7 @@ class InvoiceService {
         usdRate: rate,
         note: sale['note'] as String?,
       );
-      await PdfService.share(file);
+      await PdfOutput.show(context, file);
     } catch (e) {
       if (context.mounted) snack(context, 'خطا در ساخت فاکتور: $e');
     }

@@ -105,8 +105,8 @@ class PdfService {
           pw.Text('کارتکس انبار', style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold)),
           pw.Divider(),
           _kv('کد پسته', code, bold: true),
-          _kv('وزن کل', '${faNum(totalWeight)} کیلو'),
-          _kv('وزن خالص', '${faNum(netWeight)} کیلو'),
+          _kv('وزن کل (ناخالص)', '${faNum(totalWeight)} کیلو'),
+          _kv('وزن پسته (خالص)', '${faNum(netWeight)} کیلو'),
           _kv('تعداد گونی', faNum(smallSacks + largeSacks)),
           _kv('تعداد گونی کوچک', faNum(smallSacks)),
           _kv('تعداد گونی بزرگ', faNum(largeSacks)),
@@ -230,6 +230,54 @@ class PdfService {
   }
 
   /// گزارش کلی همه‌ی تراکنش‌های پرداخت یا دریافت در یک بازه‌ی زمانی
+  /// PDF دفتر قرض و وام: خلاصهٔ مانده‌ها + جدول تراکنش‌ها + جدول سررسیدها
+  static Future<File> buildLoanLedger({
+    required String title,
+    required String subtitle,
+    required List<(String, String)> summary,
+    required List<({String heading, List<List<String>> rows})> sections, // ردیف اول هر جدول = عنوان ستون‌ها
+  }) async {
+    await _ensureFonts();
+    final doc = pw.Document(theme: _theme());
+    final now = DateTime.now();
+    doc.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        textDirection: pw.TextDirection.rtl,
+        header: (ctx) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+          pw.Text(pdfText(title), style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
+          if (subtitle.isNotEmpty) pw.Text(pdfText(subtitle), style: const pw.TextStyle(fontSize: 10)),
+          pw.Text(pdfText('تاریخ تهیه گزارش: ${jalaliDateFromDt(now)}'), style: const pw.TextStyle(fontSize: 9)),
+          pw.Divider(),
+        ]),
+        footer: (ctx) => _brandFooter(),
+        build: (ctx) => [
+          for (final s in summary) _kv(s.$1, s.$2, bold: true),
+          pw.SizedBox(height: 4),
+          pw.Text(pdfText('این مبالغ در سود و زیان حساب نمی‌شوند.'), style: const pw.TextStyle(fontSize: 9)),
+          for (final sec in sections) ...[
+            pw.SizedBox(height: 14),
+            pw.Text(pdfText(sec.heading), style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+            pw.SizedBox(height: 6),
+            if (sec.rows.length > 1)
+              pw.Table.fromTextArray(
+                headers: sec.rows.first.map(pdfText).toList(),
+                data: sec.rows.skip(1).map((r) => r.map(pdfText).toList()).toList(),
+                headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9),
+                cellStyle: const pw.TextStyle(fontSize: 8.5),
+                cellAlignment: pw.Alignment.centerRight,
+                headerAlignment: pw.Alignment.centerRight,
+                border: pw.TableBorder.all(width: 0.4),
+              )
+            else
+              pw.Text(pdfText('موردی ثبت نشده است')),
+          ],
+        ],
+      ),
+    );
+    return _saveDoc(doc, 'loan_ledger_${now.millisecondsSinceEpoch}.pdf');
+  }
+
   static Future<File> buildGlobalReport({
     required String title,
     required String periodLabel,
@@ -303,7 +351,7 @@ class PdfService {
     final amountUsd = unitUsd == null ? null : netWeight * unitUsd;
 
     final headers = <String>[
-      'ردیف', 'دسته', 'نوع', 'کد پسته', 'وزن خالص (کیلو)', 'فی (تومان)', 'مبلغ (تومان)',
+      'ردیف', 'دسته', 'نوع', 'کد پسته', 'وزن (خالص) کیلو', 'فی (تومان)', 'مبلغ (تومان)',
       if (withUsd) ...['فی (دلار)', 'مبلغ (دلار)'],
     ];
     final row = <String>[
@@ -361,9 +409,9 @@ class PdfService {
             padding: const pw.EdgeInsets.all(10),
             decoration: pw.BoxDecoration(border: pw.Border.all(width: 0.5), borderRadius: pw.BorderRadius.circular(6)),
             child: pw.Column(children: [
-              _kv('وزن کل (با گونی)', '${faNum(totalWeight)} کیلو'),
+              _kv('وزن کل (ناخالص - با گونی)', '${faNum(totalWeight)} کیلو'),
               _kv('گونی کوچک / بزرگ', '${faNum(smallSacks)} / ${faNum(largeSacks)}'),
-              _kv('وزن خالص', '${faNum(netWeight)} کیلو'),
+              _kv('وزن پسته (خالص)', '${faNum(netWeight)} کیلو'),
             ]),
           ),
           if (specs.isNotEmpty) ...[

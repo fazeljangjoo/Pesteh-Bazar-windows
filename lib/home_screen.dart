@@ -116,7 +116,7 @@ class HomeScreen extends StatelessWidget {
                   child: Padding(
                     padding: const EdgeInsets.all(12),
                     child: Column(children: [
-                      infoRow('وزن موجودی', '${faNum(invKg)} کیلو'),
+                      infoRow('وزن موجودی (خالص)', '${faNum(invKg)} کیلو'),
                       infoRow('ارزش خرید موجودی', '${faNum(invValue, dec: 0)} تومان'),
                     ]),
                   ),

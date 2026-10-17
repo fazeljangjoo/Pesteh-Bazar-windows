@@ -18,6 +18,9 @@ String _actionLabel(String a) => switch (a) {
       'sales.create' => 'ثبت فروش',
       'sales.update' => 'ویرایش فروش',
       'sales.delete' => 'حذف فروش',
+      'parties.create' => 'افزودن طرف‌حساب',
+      'loans.create' => 'ثبت قرض/بازپرداخت',
+      'loans.delete' => 'حذف قرض/بازپرداخت',
       _ => a,
     };
 

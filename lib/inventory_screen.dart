@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
+import 'charts.dart';
 import 'db.dart';
 import 'mix_form.dart';
+import 'pdf_output.dart';
 import 'pdf_service.dart';
 import 'utils.dart';
 import 'widgets.dart';
@@ -48,17 +50,17 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   child: ListTile(
                     dense: true,
                     title: Text('${s['category_name']} - ${s['type_name']}'),
-                    subtitle: Text('کد ${s['code'] ?? '-'}  •  ${faNum(s['weight'] as num)} کیلو  •  '
+                    subtitle: Text('کد ${s['code'] ?? '-'}  •  ${faNum(s['weight'] as num)} کیلو (خالص)  •  '
                         '${jalaliDate(s['source_date'] as String)}'
                         '${(((s['small_sacks'] as num?) ?? 0) > 0 || ((s['large_sacks'] as num?) ?? 0) > 0) ? '\nگونی مصرفی: کوچک ${faNum((s['small_sacks'] as num?) ?? 0)} / بزرگ ${faNum((s['large_sacks'] as num?) ?? 0)}' : ''}'),
                     isThreeLine: ((s['small_sacks'] as num?) ?? 0) > 0 || ((s['large_sacks'] as num?) ?? 0) > 0,
                   ),
                 ),
               const SizedBox(height: 8),
-              infoRow('وزن خالص این قلم', '${faNum(net)} کیلو'),
+              infoRow('وزن این قلم (خالص)', '${faNum(net)} کیلو'),
               if (l['waste'] != null && (l['waste'] as num) > 0)
                 infoRow('ضایعات/خاک', '${faNum(l['waste'] as num)} کیلو'),
-              infoRow('مانده فعلی', '${faNum(rem)} کیلو'),
+              infoRow('مانده فعلی (خالص)', '${faNum(rem)} کیلو'),
               infoRow('گونی مانده: کوچک / بزرگ',
                   '${faNum((l['small_left'] as num?) ?? 0)} / ${faNum((l['large_left'] as num?) ?? 0)}'),
               if (l['ounce'] != null) infoRow('انس', faNum(l['ounce'] as num)),
@@ -85,7 +87,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                     smallSacks: (l['small_sack_count'] as num).toDouble(),
                     largeSacks: (l['large_sack_count'] as num).toDouble(),
                   );
-                  await PdfService.share(file);
+                  await PdfOutput.show(context, file);
                 },
                 icon: const Icon(Icons.picture_as_pdf_outlined),
                 label: const Text('دریافت کارتکس A6'),
@@ -114,6 +116,31 @@ class _InventoryScreenState extends State<InventoryScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  /// نمودار کروی «تفکیک موجودی خالص بر اساس نوع پسته»؛ قلم‌های مخلوط/جداسازی بر اساس «نوع زیردسته»شان حساب می‌شوند
+  Widget _stockChart(BuildContext context, List<Map<String, dynamic>> items) {
+    final data = <String, double>{};
+    for (final l in items) {
+      final rem = (l['remaining'] as num).toDouble();
+      if (rem <= 1e-6) continue;
+      final base = (l['base_type'] as String?)?.trim() ?? '';
+      final key = base.isNotEmpty ? base : '${l['type_name']}';
+      data[key] = (data[key] ?? 0) + rem;
+    }
+    return ChartCard(
+      title: 'تفکیک موجودی بر اساس نوع پسته',
+      subtitle: '${_showMixed ? 'مخلوط / جداسازی' : 'خریداری‌شده'} • وزن (خالص)',
+      child: data.isEmpty
+          ? const ChartEmpty('موجودی‌ای برای نمایش نیست')
+          : Center(
+              child: DonutChart(
+                slices: topSlices(data, maxSlices: 5),
+                centerTitle: 'جمع موجودی (خالص)',
+                format: (v) => '${faNum(v)} کیلو',
+              ),
+            ),
     );
   }
 
@@ -198,7 +225,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 child: Padding(
                   padding: const EdgeInsets.all(12),
                   child: Column(children: [
-                    infoRow('مجموع موجودی', '${faNum(totalKg)} کیلو'),
+                    infoRow('مجموع موجودی (خالص)', '${faNum(totalKg)} کیلو'),
                     infoRow('ارزش خرید موجودی', '${faNum(totalValue, dec: 0)} تومان'),
                     infoRow('تعداد گونی کل', '${faNum(totalSmall + totalLarge)} عدد'),
                     infoRow('گونی کوچک / بزرگ', '${faNum(totalSmall)} / ${faNum(totalLarge)}'),
@@ -207,6 +234,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   ]),
                 ),
               ));
+              children.add(const SizedBox(height: 4));
+              children.add(_stockChart(context, available));
             } else {
               double soldKg = 0, soldValue = 0;
               for (final p in soldOut) {
@@ -219,7 +248,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   padding: const EdgeInsets.all(12),
                   child: Column(children: [
                     infoRow('تعداد خریدهای فروش‌رفته', '${faNum(soldOut.length, dec: 0)} بار'),
-                    infoRow('مجموع وزن فروش‌رفته', '${faNum(soldKg)} کیلو'),
+                    infoRow('مجموع وزن فروش‌رفته (خالص)', '${faNum(soldKg)} کیلو'),
                     infoRow('ارزش خرید آن‌ها', '${faNum(soldValue, dec: 0)} تومان'),
                     if (_showMixed && totalWaste > 0.0005)
                       infoRow('مجموع ضایعات ثبت‌شده', '${faNum(totalWaste)} کیلو'),
@@ -293,7 +322,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                       initiallyExpanded: q.isNotEmpty,
                       title: Text(e.key),
                       subtitle: Text(
-                          '${faNum(_showSold ? sumNet : sumRem)} کیلو  •  ${faNum(e.value.length, dec: 0)} بار'),
+                          '${faNum(_showSold ? sumNet : sumRem)} کیلو (خالص)  •  ${faNum(e.value.length, dec: 0)} بار'),
                       children: [for (final l in e.value) _lotTile(context, l)],
                     ),
                   ));
@@ -318,7 +347,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
     final lines = <String>[
       'کد پسته: ${l['code'] ?? '-'}',
       'خرید ${jalaliDate(l['date'] as String)}  •  فی ${faNum(l['price'] as num, dec: 0)}',
-      if (!sold && soldW > 1e-6) 'از ${faNum(net)} کیلو خریداری‌شده، ${faNum(soldW)} کیلو فروخته/مصرف شده',
+      if (!sold && soldW > 1e-6) 'از ${faNum(net)} کیلو (خالص) خریداری‌شده، ${faNum(soldW)} کیلو (خالص) فروخته/مصرف شده',
       if (codes.isNotEmpty)
         '🔀 ${rem <= 1e-6 ? 'کل موجودی آن' : 'بخشی از آن'} داخل مخلوط/جداسازی ${codes.join('، ')} است (هنوز کامل فروش نرفته)',
       if (isMix && ((l['waste'] as num?) ?? 0) > 0.0005) 'ضایعات/خاک: ${faNum(l['waste'] as num)} کیلو',
@@ -335,8 +364,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
               message: 'مخلوط/جداسازی — از جنس‌های خودِ انبار ساخته شده', child: Icon(Icons.merge_type))
           : null,
       title: Text(sold
-          ? '${faNum(net)} کیلو  •  فروش رفت${isMix ? '  •  مخلوط/جداسازی' : ''}'
-          : '${faNum(rem)} کیلو مانده${isMix ? '  •  مخلوط/جداسازی' : ''}'),
+          ? '${faNum(net)} کیلو (خالص)  •  فروش رفت${isMix ? '  •  مخلوط/جداسازی' : ''}'
+          : '${faNum(rem)} کیلو (خالص) مانده${isMix ? '  •  مخلوط/جداسازی' : ''}'),
       subtitle: Text(lines.join('\n')),
       isThreeLine: lines.length >= 3,
     );

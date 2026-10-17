@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'db.dart';
 import 'utils.dart';
 
 Widget numField(
@@ -350,3 +351,80 @@ Widget fxLockedField(String label) => Padding(
         ),
       ),
     );
+
+// ============================================================================
+// ثبت با «تأیید قطعی» + محافظ ویرایش
+// ============================================================================
+
+/// پیام خطای قابل‌فهم برای کاربر
+String friendlyError(Object e) {
+  if (e is StateError && '${e.message}'.contains('no_account')) {
+    return 'نشست ورود شما بسته شده است؛ دوباره وارد حساب شوید.';
+  }
+  if (e is SaveNotConfirmed) return e.message;
+  return e.toString().replaceFirst('Exception: ', '').replaceFirst('Bad state: ', '');
+}
+
+/// عملیات ثبت را اجرا می‌کند و فقط وقتی دیتابیس «تأیید قطعی» داد، پیام موفقیت نشان می‌دهد.
+/// اگر ثبت نشود، یک اخطار صریح (نه پیام موفقیت) نشان داده می‌شود و کاربر می‌تواند دوباره تلاش کند؛
+/// اطلاعاتِ فرم دست‌نخورده می‌ماند.
+Future<bool> saveConfirmed(
+  BuildContext context,
+  Future<void> Function() action, {
+  required String successMsg,
+}) async {
+  final messenger = ScaffoldMessenger.of(context);
+  while (true) {
+    try {
+      await action();
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+          backgroundColor: Colors.green.shade700,
+          duration: const Duration(seconds: 3),
+          content: Row(children: [
+            const Icon(Icons.check_circle, color: Colors.white),
+            const SizedBox(width: 10),
+            Expanded(child: Text(successMsg)),
+          ]),
+        ));
+      return true;
+    } catch (e) {
+      if (!context.mounted) return false;
+      final retry = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          icon: Icon(Icons.warning_amber_rounded, color: Colors.orange.shade800, size: 38),
+          title: const Text('ثبت انجام نشد'),
+          content: Text('${friendlyError(e)}\n\n'
+              'این مورد ثبت نشده است. اطلاعاتی که وارد کرده‌اید پاک نشده؛ می‌توانید دوباره تلاش کنید.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('بستن')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('تلاش دوباره')),
+          ],
+        ),
+      );
+      if (retry != true) return false;
+    }
+  }
+}
+
+/// تا وقتی یک فرم/صفحهٔ ثبت باز است، دریافت خودکار از سرور (که شناسه‌ها را عوض می‌کند)
+/// عقب می‌افتد؛ این همان چیزی است که باعث «گم‌شدنِ» ثبت‌های بعد از معطلیِ طولانی می‌شد.
+mixin EditGuard<T extends StatefulWidget> on State<T> {
+  Object? _editToken;
+
+  @override
+  void initState() {
+    super.initState();
+    _editToken = AppDb.I.beginEdit();
+  }
+
+  @override
+  void dispose() {
+    final t = _editToken;
+    if (t != null) AppDb.I.endEdit(t);
+    super.dispose();
+  }
+}

@@ -151,9 +151,9 @@ class _SalesScreenState extends State<SalesScreen> {
                         Text(comp),
                         infoRow('کد پسته', _codeOf(sale)),
                         const SizedBox(height: 8),
-                        infoRow('وزن کل (با گونی)', '${faNum(total)} کیلو'),
+                        infoRow('وزن کل (ناخالص - با گونی)', '${faNum(total)} کیلو'),
                         infoRow('وزن گونی‌ها', '${faNum(tare)} کیلو$sackCounts'),
-                        infoRow('وزن خالص پسته', '${faNum(net)} کیلو'),
+                        infoRow('وزن پسته (خالص)', '${faNum(net)} کیلو'),
                         infoRow('فی فروش', '${faNum(price, dec: 0)} تومان'),
                         infoRow('مبلغ فروش', '${faNum(revenue, dec: 0)} تومان'),
                         if (fx) ...[

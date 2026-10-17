@@ -119,6 +119,24 @@ Future<List<DueItem>> loadDues({bool includePaid = false}) async {
       true,
       'چک');
 
+  // ---- سررسید قرض و وام (اعطای قرض = دریافتی ما، دریافت قرض = پرداختیِ ما) ----
+  for (final r in await AppDb.I.loanDueRows(includePaid: includePaid)) {
+    final given = r['kind'] == 'given';
+    out.add(DueItem(
+      table: 'loan_dues',
+      id: r['id'] as int,
+      receivable: given,
+      kind: 'قرض',
+      party: partyKey(r['party'] as String?),
+      label: given ? 'قرض اعطایی' : 'قرض دریافتی',
+      ref: null,
+      bank: null,
+      amount: (r['amount'] as num).toDouble(),
+      date: DateTime.parse(r['due_date'] as String),
+      paid: ((r['paid'] as num?) ?? 0) == 1,
+    ));
+  }
+
   out.sort((a, b) => a.date.compareTo(b.date));
   return out;
 }
@@ -145,6 +163,36 @@ class PartyEntry {
   double get remaining => total - settled;
 }
 
+/// نام‌های رسمی انواع تراکنش دفتر قرض و وام
+const Map<String, String> kLoanKindLabel = {
+  'given': 'قرض اعطایی',
+  'taken': 'قرض دریافتی',
+  'repay_in': 'بازپرداخت دریافتی',
+  'repay_out': 'بازپرداخت پرداختی',
+};
+
+/// آیا این نوع تراکنش پول به حساب ما وارد می‌کند؟ (قرض دریافتی / بازپرداخت دریافتی)
+bool loanKindIsIn(String kind) => kind == 'taken' || kind == 'repay_in';
+
+class LoanEntry {
+  final int id;
+  final String uid;
+  final String kind; // given | taken | repay_in | repay_out
+  final double amount;
+  final DateTime date;
+  final String? note;
+  LoanEntry({
+    required this.id,
+    required this.uid,
+    required this.kind,
+    required this.amount,
+    required this.date,
+    required this.note,
+  });
+  String get label => kLoanKindLabel[kind] ?? kind;
+  bool get isIn => loanKindIsIn(kind);
+}
+
 class PartyAccount {
   final String key;
   double bought = 0; // جمع خرید از او
@@ -152,7 +200,29 @@ class PartyAccount {
   double sold = 0; // جمع فروش به او
   double received = 0; // دریافت‌شده از او
   final List<PartyEntry> entries = [];
+
+  // ---- دفتر قرض و وام (جدا از خرید/فروش؛ در سود و زیان حساب نمی‌شود) ----
+  double loanGiven = 0; // قرض اعطایی
+  double loanTaken = 0; // قرض دریافتی
+  double repaidToUs = 0; // بازپرداخت دریافتی (او به ما پس داده)
+  double repaidByUs = 0; // بازپرداخت پرداختی (ما به او پس داده‌ایم)
+  final List<LoanEntry> loans = [];
+
   PartyAccount(this.key);
+
+  /// مانده طلب قرضی: چقدر از قرضِ اعطایی هنوز به ما برنگشته
+  double get loanReceivable => loanGiven - repaidToUs;
+
+  /// مانده بدهی قرضی: چقدر از قرضِ دریافتی هنوز پس نداده‌ایم
+  double get loanPayable => loanTaken - repaidByUs;
+
+  /// مثبت = او بابت قرض به ما بدهکار است، منفی = ما بدهکاریم
+  double get loanNet => loanReceivable - loanPayable;
+
+  bool get hasLoans => loans.isNotEmpty;
+
+  /// تراز کل (خرید/فروش + قرض)
+  double get totalNet => net + loanNet;
 
   String get name => key.isEmpty ? 'بدون نام' : key;
 
@@ -233,10 +303,99 @@ Future<List<PartyAccount>> loadParties() async {
     ));
   }
 
+  // طرف‌حساب‌هایی که دستی تعریف شده‌اند (حتی اگر هنوز خرید/فروشی نداشته باشند)
+  for (final r in await d.query('parties')) {
+    acc(r['name'] as String?);
+  }
+
+  // دفتر قرض و وام
+  for (final r in await d.query('loan_entries', orderBy: 'date DESC, id DESC')) {
+    final a = acc(r['party'] as String?);
+    final kind = (r['kind'] as String?) ?? '';
+    final amount = (r['amount'] as num).toDouble();
+    switch (kind) {
+      case 'given':
+        a.loanGiven += amount;
+        break;
+      case 'taken':
+        a.loanTaken += amount;
+        break;
+      case 'repay_in':
+        a.repaidToUs += amount;
+        break;
+      case 'repay_out':
+        a.repaidByUs += amount;
+        break;
+      default:
+        continue;
+    }
+    a.loans.add(LoanEntry(
+      id: (r['id'] as num).toInt(),
+      uid: (r['uid'] as String?) ?? '',
+      kind: kind,
+      amount: amount,
+      date: DateTime.parse(r['date'] as String),
+      note: r['note'] as String?,
+    ));
+  }
+
   final list = map.values.toList();
   for (final a in list) {
     a.entries.sort((x, y) => y.date.compareTo(x.date));
   }
-  list.sort((a, b) => b.net.abs().compareTo(a.net.abs()));
+  list.sort((a, b) => b.totalNet.abs().compareTo(a.totalNet.abs()));
   return list;
+}
+
+// ======================= گردش واریزی و برداشت =======================
+
+/// یک حرکت واقعیِ پول: واریزی (به حساب ما) یا برداشت (از حساب ما)
+class CashFlow {
+  final DateTime date;
+  final double amount;
+  final bool isIn; // true = واریزی، false = برداشت
+  final String party;
+  final bool isLoan;
+  CashFlow(this.date, this.amount, this.isIn, this.party, this.isLoan);
+}
+
+/// فقط تراکنش‌های «انجام‌شده» (تسویه‌شده) در بازهٔ [from, to] (هر دو شامل).
+/// واریزی = دریافت از خریدارها (+ قرض دریافتی و بازپرداخت دریافتی در صورت [includeLoans])
+/// برداشت = پرداخت به فروشنده‌ها (+ قرض اعطایی و بازپرداخت پرداختی در صورت [includeLoans])
+Future<List<CashFlow>> loadCashFlows({
+  required DateTime from,
+  required DateTime to,
+  String? partyKeyFilter,
+  bool includeLoans = false,
+}) async {
+  final out = <CashFlow>[];
+  final start = DateTime(from.year, from.month, from.day);
+  final endEx = DateTime(to.year, to.month, to.day + 1);
+  bool inRange(DateTime d) => !d.isBefore(start) && d.isBefore(endEx);
+  bool matches(String name) => partyKeyFilter == null || partyKey(name) == partyKeyFilter;
+
+  final db = AppDb.I;
+  for (final r in await db.allReceiptTransactions()) {
+    if (((r['paid'] as num?) ?? 0) != 1) continue;
+    final dt = DateTime.parse(r['date'] as String);
+    final name = '${r['name'] ?? ''}';
+    if (!inRange(dt) || !matches(name == '-' ? '' : name)) continue;
+    out.add(CashFlow(dt, (r['amount'] as num).toDouble(), true, name, false));
+  }
+  for (final r in await db.allPaymentTransactions()) {
+    if (((r['paid'] as num?) ?? 0) != 1) continue;
+    final dt = DateTime.parse(r['date'] as String);
+    final name = '${r['name'] ?? ''}';
+    if (!inRange(dt) || !matches(name == '-' ? '' : name)) continue;
+    out.add(CashFlow(dt, (r['amount'] as num).toDouble(), false, name, false));
+  }
+  if (includeLoans) {
+    for (final r in await db.loanEntries()) {
+      final dt = DateTime.parse(r['date'] as String);
+      final name = '${r['party'] ?? ''}';
+      if (!inRange(dt) || !matches(name)) continue;
+      out.add(CashFlow(dt, (r['amount'] as num).toDouble(), loanKindIsIn('${r['kind']}'), name, true));
+    }
+  }
+  return out;
 }

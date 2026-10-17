@@ -12,6 +12,7 @@ const int _creditBase = 1000000;
 const int _chequeBase = 2000000;
 const int _receiptCreditBase = 3000000;
 const int _receiptChequeBase = 4000000;
+const int _loanBase = 6000000;
 
 class NotifyService {
   NotifyService._();
@@ -127,6 +128,19 @@ class NotifyService {
 
   Future<void> cancelReceiptChequeRow(int id) => cancelDueByBase(_receiptChequeBase + id);
 
+  /// سررسید قرض: اعطای قرض = وصول طلب، دریافت قرض = بازپرداخت بدهی
+  Future<void> scheduleLoanRow(Map<String, dynamic> row) async {
+    final id = (row['id'] as int).abs() % 900000;
+    final dueDate = DateTime.parse(row['due_date'] as String);
+    final amount = (row['amount'] as num).toDouble();
+    final given = row['kind'] == 'given';
+    final party = (row['party'] as String?) ?? '';
+    await _scheduleDue(_loanBase + id, given ? 'سررسید وصول قرض' : 'سررسید بازپرداخت قرض',
+        '${faNum(amount, dec: 0)} تومان ${given ? 'از' : 'به'} $party', dueDate);
+  }
+
+  Future<void> cancelLoanRow(int id) => cancelDueByBase(_loanBase + id.abs() % 900000);
+
   /// هنگام باز شدن برنامه همه یادآوری‌های پرداخت‌نشده را دوباره زمان‌بندی می‌کند
   Future<void> rescheduleAll() async {
     if (!_ready) return;
@@ -142,6 +156,9 @@ class NotifyService {
       }
       for (final row in await AppDb.I.unpaidReceiptChequeInst()) {
         await scheduleReceiptChequeRow(row);
+      }
+      for (final row in await AppDb.I.unpaidLoanDues()) {
+        await scheduleLoanRow(row);
       }
     } catch (_) {}
   }

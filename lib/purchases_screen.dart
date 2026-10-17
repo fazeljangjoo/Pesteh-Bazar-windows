@@ -4,6 +4,7 @@ import 'db.dart';
 import 'invoice_service.dart';
 import 'license_service.dart';
 import 'payment_screen.dart';
+import 'pdf_output.dart';
 import 'pdf_service.dart';
 import 'purchase_form.dart';
 import 'notify_service.dart';
@@ -30,11 +31,11 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
       ['فی خرید', '${faNum(p['price'] as num, dec: 0)} تومان'],
       if (LicenseService.I.isFx.value && p['usd_rate'] != null) ['قیمت دلار روز خرید', '${faNum(p['usd_rate'] as num, dec: 0)} تومان'],
       if (LicenseService.I.isFx.value && p['price_usd'] != null) ['فی خرید به دلار (هر کیلو)', faUsd(p['price_usd'] as num, dec: 4)],
-      ['وزن کل', '${faNum(p['total_weight'] as num)} کیلو'],
+      ['وزن کل (ناخالص)', '${faNum(p['total_weight'] as num)} کیلو'],
       ['گونی کوچک (۱۰۰گ) / بزرگ (۲۰۰گ)',
           '${faNum(p['small_sack_count'] as num)} / ${faNum(p['large_sack_count'] as num)}'],
-      ['وزن خالص', '${faNum(p['net_weight'] as num)} کیلو'],
-      ['مانده در انبار', '${faNum(p['remaining'] as num)} کیلو'],
+      ['وزن پسته (خالص)', '${faNum(p['net_weight'] as num)} کیلو'],
+      ['مانده در انبار (خالص)', '${faNum(p['remaining'] as num)} کیلو'],
       ['گونی مانده: کوچک / بزرگ',
           '${faNum((p['small_sacks_remaining'] as num?) ?? 0)} / ${faNum((p['large_sacks_remaining'] as num?) ?? 0)}'],
       if (((p['in_mix_codes'] as List?) ?? const []).isNotEmpty)
@@ -104,7 +105,7 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                     smallSacks: (p['small_sack_count'] as num).toDouble(),
                     largeSacks: (p['large_sack_count'] as num).toDouble(),
                   );
-                  await PdfService.share(file);
+                  await PdfOutput.show(context, file);
                 },
                 icon: const Icon(Icons.picture_as_pdf_outlined),
                 label: const Text('دریافت کارتکس A6'),
@@ -145,8 +146,8 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
         leading: CircleAvatar(child: Icon(hasPhoto ? Icons.photo_camera_outlined : Icons.grass)),
         title: Text('${p['category_name']} - ${p['type_name']}'),
         subtitle: Text(
-            'کد ${p['code'] ?? '-'}  •  ${jalaliDate(p['date'] as String)}  •  ${faNum(p['net_weight'] as num)} کیلو خالص\n'
-            '${sold ? 'فروخته‌شده' : 'مانده ${faNum(p['remaining'] as num)} کیلو'}  •  فی ${faNum(p['price'] as num, dec: 0)} تومان'
+            'کد ${p['code'] ?? '-'}  •  ${jalaliDate(p['date'] as String)}  •  ${faNum(p['net_weight'] as num)} کیلو (خالص)\n'
+            '${sold ? 'فروخته‌شده' : 'مانده ${faNum(p['remaining'] as num)} کیلو (خالص)'}  •  فی ${faNum(p['price'] as num, dec: 0)} تومان'
             '${LicenseService.I.isFx.value && p['price_usd'] != null ? ' (${faUsd(p['price_usd'] as num, dec: 3)})' : ''}'
             '${_inMixLine(p)}'),
         isThreeLine: true,

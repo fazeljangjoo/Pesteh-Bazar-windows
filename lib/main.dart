@@ -97,7 +97,7 @@ class PestehApp extends StatelessWidget {
         // ویندوز: صفحه‌ها برای عرض گوشی طراحی شده‌اند؛ روی مانیتور بزرگ وسط و با عرض مناسب نمایش داده می‌شوند
         return ColoredBox(
           color: const Color(0xFFE9EDE6),
-          child: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 960), child: body)),
+          child: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 1280), child: body)),
         );
       },
       home: const LicenseGate(child: RenewBannerHost(child: DueAlertHost(child: AppLockHost(child: HomeShell())))),

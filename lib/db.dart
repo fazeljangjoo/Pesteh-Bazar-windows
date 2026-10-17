@@ -26,7 +26,7 @@ const List<(String, List<String>)> _kSnapshot = [
       'small_sack_count', 'large_sack_count', 'small_sacks_remaining', 'large_sacks_remaining',
       'net_weight', 'remaining', 'gram', 'pct_dombest',
       'pct_tuchin', 'pct_crooked', 'pct_khandan', 'custom_specs', 'photo', 'seller', 'note',
-      'is_mix', 'created_at', 'usd_rate', 'price_usd', 'waste'
+      'is_mix', 'created_at', 'usd_rate', 'price_usd', 'waste', 'base_type'
     ]
   ),
   ('mix_sources', ['id', 'mix_purchase_id', 'source_purchase_id', 'weight', 'small_sacks', 'large_sacks']),
@@ -73,7 +73,26 @@ const List<(String, List<String>)> _kSnapshot = [
       'to_account', 'receiver_name', 'paid'
     ]
   ),
+  // طرف‌حساب‌های تعریف‌شده‌ی دستی و دفتر قرض/وام (در سود و زیان حساب نمی‌شوند)
+  ('parties', ['id', 'name']),
+  ('loan_entries', ['id', 'uid', 'party', 'kind', 'amount', 'date', 'note', 'created_at']),
+  ('loan_dues', ['id', 'loan_uid', 'seq', 'due_date', 'amount', 'note', 'paid']),
 ];
+
+/// جدول‌هایی که اگر سرور هنوز نفرستاد (سرور قدیمی)، داده‌ی محلی‌شان پاک نمی‌شود
+const Set<String> _kOptionalTables = {'parties', 'loan_entries', 'loan_dues'};
+
+/// انواع تراکنش دفتر قرض/وام
+const List<String> kLoanKinds = ['given', 'taken', 'repay_in', 'repay_out'];
+
+/// ثبت انجام شد ولی «تأیید قطعی» از دیتابیس گرفته نشد؛ در این حالت کل عملیات برگردانده می‌شود
+/// (چیزی نیمه‌کاره ذخیره نمی‌شود) و به کاربر اخطار داده می‌شود.
+class SaveNotConfirmed implements Exception {
+  final String message;
+  SaveNotConfirmed([this.message = 'ثبت تأیید نشد و چیزی ذخیره نشد.']);
+  @override
+  String toString() => message;
+}
 
 const Set<String> _kRealCols = {
   'ounce', 'price', 'total_weight', 'small_sack_count', 'large_sack_count', 'small_sacks_remaining',
@@ -91,7 +110,7 @@ const String _pSel = 'p.id, p.code, p.category_id, p.type_name, p.date, p.ounce,
     'p.small_sack_count, p.large_sack_count, p.small_sacks_remaining, p.large_sacks_remaining, '
     'p.net_weight, p.remaining, p.gram, p.pct_dombest, '
     'p.pct_tuchin, p.pct_crooked, p.pct_khandan, p.custom_specs, p.seller, p.note, p.is_mix, '
-    'p.usd_rate, p.price_usd, p.waste, p.created_at, p.ord, (p.photo IS NOT NULL OR p.photo_pending = 1) AS has_photo';
+    'p.usd_rate, p.price_usd, p.waste, p.base_type, p.created_at, p.ord, (p.photo IS NOT NULL OR p.photo_pending = 1) AS has_photo';
 
 class _SaleV {
   final Map<String, dynamic> row;
@@ -115,7 +134,7 @@ class AppDb {
   /// با هر تغییر داده زیاد می‌شود تا صفحه‌ها بازخوانی شوند
   final ValueNotifier<int> version = ValueNotifier<int>(0);
 
-  static const int schemaVersion = 10;
+  static const int schemaVersion = 12;
 
   String? _phone;
   Database? _db;
@@ -200,6 +219,44 @@ class AppDb {
       // ضایعات/خاکِ مخلوط/جداسازی (مخلوط‌های قدیمی null می‌مانند)
       await d.execute('ALTER TABLE purchases ADD COLUMN waste REAL');
     }
+    if (oldV < 11) {
+      // طرف‌حساب‌های دستی + دفتر قرض/وام
+      await _createLoanTables(d);
+    }
+    if (oldV < 12) {
+      // سررسید/اقساط قرض + نوع زیردستهٔ مخلوط/جداسازی (برای نمودارهای دقیق‌تر)
+      await _createLoanTables(d);
+      await d.execute('ALTER TABLE purchases ADD COLUMN base_type TEXT');
+    }
+  }
+
+  Future<void> _createLoanTables(Database d) async {
+    await d.execute('''
+      CREATE TABLE IF NOT EXISTS parties(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL
+      )''');
+    await d.execute('''
+      CREATE TABLE IF NOT EXISTS loan_entries(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        uid TEXT NOT NULL,
+        party TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        amount REAL NOT NULL,
+        date TEXT NOT NULL,
+        note TEXT,
+        created_at TEXT
+      )''');
+    await d.execute('''
+      CREATE TABLE IF NOT EXISTS loan_dues(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        loan_uid TEXT NOT NULL,
+        seq INTEGER NOT NULL,
+        due_date TEXT NOT NULL,
+        amount REAL NOT NULL,
+        note TEXT,
+        paid INTEGER NOT NULL DEFAULT 0
+      )''');
   }
 
   /// گونی باقی‌ماندهٔ داده‌های قدیمی را مثل backfillSacksRemaining سرور (app.php) حساب می‌کند:
@@ -264,6 +321,7 @@ class AppDb {
         usd_rate REAL,
         price_usd REAL,
         waste REAL,
+        base_type TEXT,
         ord INTEGER NOT NULL DEFAULT 0
       )''');
     await d.execute('''
@@ -415,6 +473,7 @@ class AppDb {
         server_id INTEGER NOT NULL,
         PRIMARY KEY(kind, local_id)
       )''');
+    await _createLoanTables(d);
     // نکته: دسته‌ها و انواع پیش‌فرض را سرور می‌سازد (bootstrap) و هنگام ورود دریافت می‌شوند.
   }
 
@@ -487,6 +546,93 @@ class AppDb {
     var s = v.toStringAsFixed(3);
     s = s.replaceFirst(RegExp(r'\.?0+$'), '');
     return s;
+  }
+
+  // ======================= ایمنی ثبت: سلامت دیتابیس، تلاش مجدد، محافظ ویرایش =======================
+  final Map<Object, DateTime> _editors = {};
+
+  /// فرم/صفحهٔ ثبت باز شد: تا بسته‌شدنش، دریافت خودکار از سرور (که شناسه‌ها را عوض می‌کند) انجام نمی‌شود
+  Object beginEdit() {
+    final k = Object();
+    _editors[k] = DateTime.now();
+    return k;
+  }
+
+  void endEdit(Object k) => _editors.remove(k);
+
+  /// آیا الان فرمی باز است؟ (صفحه‌ای که بیش از ۳ ساعت باز مانده نادیده گرفته می‌شود تا هیچ‌وقت همگام‌سازی قفل نماند)
+  bool get isEditing {
+    final cutoff = DateTime.now().subtract(const Duration(hours: 3));
+    _editors.removeWhere((_, t) => t.isBefore(cutoff));
+    return _editors.isNotEmpty;
+  }
+
+  Future<void> _reopen() async {
+    final ph = _phone;
+    if (ph == null) throw StateError('no_account');
+    try {
+      await _opening;
+    } catch (_) {}
+    try {
+      await _db?.close();
+    } catch (_) {}
+    _db = null;
+    _opening = null;
+    await db;
+  }
+
+  /// دیتابیسی که واقعاً باز و سالم است (اگر بسته شده بود، دوباره باز می‌شود)
+  Future<Database> _healthyDb() async {
+    final d = await db;
+    try {
+      await d.rawQuery('SELECT 1');
+      return d;
+    } catch (_) {
+      await _reopen();
+      return db;
+    }
+  }
+
+  /// برای وقتی برنامه از پس‌زمینه برمی‌گردد (تماس تلفن، قفل صفحه و…)
+  Future<void> ensureHealthy() async {
+    if (_phone == null) return;
+    try {
+      await _healthyDb();
+    } catch (_) {}
+  }
+
+  static bool _isTransient(Object e) {
+    final m = e.toString().toLowerCase();
+    return m.contains('database_closed') ||
+        m.contains('database is closed') ||
+        m.contains('locked') ||
+        m.contains('busy') ||
+        m.contains('disk i/o') ||
+        m.contains('not an error');
+  }
+
+  /// اجرای نوشتن روی دیتابیس؛ خطاهای گذرا (بسته‌بودن/قفل‌بودن) بی‌سروصدا و تا ۳ بار دوباره تلاش می‌شوند.
+  /// (چون تراکنش اتمیک است، تلاش مجدد باعث ثبت تکراری نمی‌شود.)
+  Future<T> _write<T>(Future<T> Function(Database d) body) async {
+    Object? last;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        final d = await _healthyDb();
+        return await body(d);
+      } on DatabaseException catch (e) {
+        if (!_isTransient(e)) rethrow;
+        last = e;
+        await _reopen();
+        await Future<void>.delayed(Duration(milliseconds: 200 * (attempt + 1)));
+      }
+    }
+    throw last ?? SaveNotConfirmed();
+  }
+
+  /// تأیید قطعی داخل همان تراکنش: اگر ردیف خواسته‌شده پیدا نشد، کل تراکنش برگردانده می‌شود
+  Future<void> _confirm(DatabaseExecutor t, String sql, List<Object?> args, [String? msg]) async {
+    final r = await t.rawQuery(sql, args);
+    if (r.isEmpty) throw SaveNotConfirmed(msg ?? 'ثبت تأیید نشد و چیزی ذخیره نشد.');
   }
 
   // ======================= متادیتا و صف ارسال =======================
@@ -677,6 +823,8 @@ class AppDb {
   /// چیزی جایگزین نمی‌شود و false برمی‌گردد تا هیچ تغییر محلی گم نشود.
   /// [discardQueue]=true: صف (شامل خطاها) دور ریخته می‌شود و سرور مرجع قرار می‌گیرد.
   Future<bool> replaceAllFromServer(Map<String, dynamic> tables, {bool discardQueue = false}) async {
+    // تا وقتی فرم/صفحهٔ ثبتی باز است، داده‌ها زیر دست کاربر عوض نمی‌شوند (دریافت بعداً انجام می‌شود)
+    if (!discardQueue && isEditing) return false;
     final d = await db;
     var applied = false;
     await d.transaction((t) async {
@@ -731,6 +879,8 @@ class AppDb {
         if (sid != null && ph != null) keepPhoto[sid] = ph;
       }
       for (final e in _kSnapshot.reversed) {
+        // سرور قدیمی این جدول‌ها را نمی‌فرستد: داده‌ی محلی‌شان را پاک نکن
+        if (_kOptionalTables.contains(e.$1) && tables[e.$1] is! List) continue;
         await t.delete(e.$1);
       }
       // شناسه‌های موقت (منفی) بعد از این دریافت عوض می‌شوند؛ صفحه‌های بازِ قدیمی هنوز شناسهٔ
@@ -1006,30 +1156,36 @@ class AppDb {
   }
 
   Future<int> insertPurchase(Map<String, dynamic> p) async {
-    final d = await db;
+    // اگر فرم از قبل باز بوده و شناسهٔ موقتِ دسته در این بین به شناسهٔ سرور تبدیل شده، اصلاح می‌شود
+    final catId = (p['category_id'] as num?)?.toInt();
+    if (catId != null) p = {...p, 'category_id': await currentId('cat', catId)};
     late int id;
-    await d.transaction((t) async {
-      final v = _purchaseValues(p);
-      final photo = _cleanPhoto(p['photo']);
-      id = await _tempId(t, 'purchases');
-      final ord = await _nextOrd(t, 'purchases');
-      await t.insert('purchases', {
-        ...v,
-        'id': id,
-        'code': 'N${-id}', // کد موقت؛ بعد از ارسال به سرور کد واقعی (KH…) جایگزین می‌شود
-        'remaining': v['net_weight'],
-        'small_sacks_remaining': v['small_sack_count'],
-        'large_sacks_remaining': v['large_sack_count'],
-        'is_mix': 0,
-        'photo': photo,
-        'photo_pending': 0,
-        'created_at': _stamp(),
-        'ord': ord,
-      });
-      final payload = _purchasePayload(v);
-      if (photo != null) payload['photo'] = photo;
-      await _enqueue(t, 'purchases.create', payload, refKind: 'pur', refId: id, mapKind: 'pur', localId: id);
-    });
+    await _write((d) => d.transaction((t) async {
+          final v = _purchaseValues(p);
+          final photo = _cleanPhoto(p['photo']);
+          id = await _tempId(t, 'purchases');
+          final ord = await _nextOrd(t, 'purchases');
+          await t.insert('purchases', {
+            ...v,
+            'id': id,
+            'code': 'N${-id}', // کد موقت؛ بعد از ارسال به سرور کد واقعی (KH…) جایگزین می‌شود
+            'remaining': v['net_weight'],
+            'small_sacks_remaining': v['small_sack_count'],
+            'large_sacks_remaining': v['large_sack_count'],
+            'is_mix': 0,
+            'photo': photo,
+            'photo_pending': 0,
+            'created_at': _stamp(),
+            'ord': ord,
+          });
+          final payload = _purchasePayload(v);
+          if (photo != null) payload['photo'] = photo;
+          await _enqueue(t, 'purchases.create', payload, refKind: 'pur', refId: id, mapKind: 'pur', localId: id);
+          // تأیید قطعی (داخل همان تراکنش): خرید در لیست دیده می‌شود و در صف ارسال به سرور هم هست
+          await _confirm(t, 'SELECT 1 FROM purchases p JOIN categories c ON c.id = p.category_id WHERE p.id = ?', [id],
+              'خرید ثبت نشد؛ دستهٔ انتخاب‌شده دیگر وجود ندارد. صفحه را ببندید و دوباره امتحان کنید.');
+          await _confirm(t, "SELECT 1 FROM sync_ops WHERE ref_kind='pur' AND ref_id=?", [id]);
+        }));
     version.value++;
     return id;
   }
@@ -1037,8 +1193,7 @@ class AppDb {
   /// ویرایش خرید. مثل سرور: اگر بخشی از آن فروخته شده باشد وزن قابل تغییر نیست.
   /// اگر کلید `photo` در p نباشد یعنی عکس تغییری نکرده است.
   Future<void> updatePurchase(int id, Map<String, dynamic> p) async {
-    final d = await db;
-    await d.transaction((t) async {
+    await _write((d) => d.transaction((t) async {
       final rows = await t.query('purchases', where: 'id=?', whereArgs: [id]);
       if (rows.isEmpty) throw Exception('این خرید یافت نشد');
       final cur = rows.first;
@@ -1079,7 +1234,7 @@ class AppDb {
       payload['id'] = id;
       if (photoChanged) payload['photo'] = photo;
       await _enqueue(t, 'purchases.create', payload, refKind: 'pur', refId: id);
-    });
+    }));
     version.value++;
   }
 
@@ -1496,6 +1651,7 @@ class AppDb {
   Future<int> createMix({
     required int categoryId,
     required String typeName,
+    String? baseType,
     required List<Map<String, dynamic>> sources,
     required double netWeight,
     required double smallSackCount,
@@ -1513,9 +1669,8 @@ class AppDb {
     }
     final srcs = _normMixSources(sources);
     final wasteV = _checkWaste(srcs, _r(netWeight, 3), waste);
-    final d = await db;
     late int mixId;
-    await d.transaction((t) async {
+    await _write((d) => d.transaction((t) async {
       final (avgPrice0, avgUsd0) = await _checkMixSources(t, srcs);
       // فی = هزینهٔ کل ÷ وزن خالص: هزینهٔ ضایعات هم در فی لحاظ می‌شود (بدون ضایعات = همان میانگین وزنی)
       final feeFactor = wasteV == null ? 1.0 : _takenOf(srcs) / _r(netWeight, 3);
@@ -1525,6 +1680,7 @@ class AppDb {
       final mixRate = (mixUsd != null && mixUsd > 0) ? _r(avgPrice / mixUsd, 2) : null;
       final net = _r(netWeight, 3);
       final name = _s(typeName, 100) ?? 'مخلوط';
+      final baseTypeV = _s(baseType, 100);
       final nt = _s(note, 500);
       mixId = await _tempId(t, 'purchases');
       final ord = await _nextOrd(t, 'purchases');
@@ -1533,6 +1689,7 @@ class AppDb {
         'code': 'N${-mixId}',
         'category_id': categoryId,
         'type_name': name,
+        'base_type': baseTypeV,
         'date': _ymd(DateTime.now()),
         'price': _r(avgPrice, 2),
         'usd_rate': mixRate,
@@ -1560,6 +1717,7 @@ class AppDb {
           {
             'category_id': categoryId,
             'type_name': name,
+        'base_type': baseTypeV,
             'sources': _mixSourcesPayload(srcs),
             'net_weight': net,
             'small_sack_count': _r(smallSackCount, 2),
@@ -1573,7 +1731,9 @@ class AppDb {
           refId: mixId,
           mapKind: 'pur',
           localId: mixId);
-    });
+      await _confirm(t, 'SELECT 1 FROM purchases p JOIN categories c ON c.id = p.category_id WHERE p.id = ?', [mixId]);
+      await _confirm(t, "SELECT 1 FROM sync_ops WHERE ref_kind='pur' AND ref_id=?", [mixId]);
+    }));
     version.value++;
     return mixId;
   }
@@ -1620,6 +1780,7 @@ class AppDb {
     required int mixPurchaseId,
     required int categoryId,
     required String typeName,
+    String? baseType,
     required List<Map<String, dynamic>> sources,
     required double netWeight,
     required double smallSackCount,
@@ -1661,12 +1822,14 @@ class AppDb {
       final mixRate = (mixUsd != null && mixUsd > 0) ? _r(avgPrice / mixUsd, 2) : null;
       final net = _r(netWeight, 3);
       final name = _s(typeName, 100) ?? 'مخلوط';
+      final baseTypeV = _s(baseType, 100);
       final nt = _s(note, 500);
       await t.update(
           'purchases',
           {
             'category_id': categoryId,
             'type_name': name,
+        'base_type': baseTypeV,
             'price': _r(avgPrice, 2),
             'usd_rate': mixRate,
             'price_usd': mixUsd,
@@ -1693,6 +1856,7 @@ class AppDb {
             'id': mixPurchaseId,
             'category_id': categoryId,
             'type_name': name,
+        'base_type': baseTypeV,
             'sources': _mixSourcesPayload(srcs),
             'net_weight': net,
             'small_sack_count': _r(smallSackCount, 2),
@@ -1847,9 +2011,8 @@ class AppDb {
     if (!const ['lump', 'staged'].contains(payType) || !const [null, 'credit', 'cheque'].contains(stagedType)) {
       throw Exception('نوع پرداخت نامعتبر است');
     }
-    final d = await db;
     late int payId;
-    await d.transaction((t) async {
+    await _write((d) => d.transaction((t) async {
       final rows = await t.query('payments', where: 'purchase_id=?', whereArgs: [purchaseId]);
       if (rows.isEmpty) {
         payId = await t.insert('payments', {'purchase_id': purchaseId, 'pay_type': payType, 'staged_type': stagedType});
@@ -1865,50 +2028,59 @@ class AppDb {
             where: 'id=?', whereArgs: [payId]);
       }
       await _queuePayment(t, purchaseId);
-    });
+      await _confirm(t, 'SELECT 1 FROM payments WHERE id = ? AND purchase_id = ?', [payId, purchaseId],
+          'ثبت نوع پرداخت تأیید نشد؛ این خرید دیگر وجود ندارد.');
+    }));
     version.value++;
     return payId;
   }
 
   Future<int?> _addTx(String table, int parentId, Map<String, dynamic> row, int max) async {
     final meta = _txMeta[table]!;
-    final d = await db;
+    final parentTable = meta.$2 ? 'receipts' : 'payments';
     int? id;
-    await d.transaction((t) async {
-      final count =
-          Sqflite.firstIntValue(await t.rawQuery('SELECT COUNT(*) FROM $table WHERE ${meta.$1}=?', [parentId])) ?? 0;
-      if (count >= max) return;
-      final r = _txRow(row);
-      r[meta.$1] = parentId;
-      if (table == 'lump_tx' || table == 'receipt_lump_tx') r.putIfAbsent('paid', () => 1);
-      id = await t.insert(table, r);
-      await _queueByParent(t, meta.$2, parentId);
-    });
-    if (id != null) version.value++;
+    await _write((d) => d.transaction((t) async {
+          // والد (پرداخت/دریافت) باید واقعاً وجود داشته باشد؛ وگرنه ردیف یتیم و نادیدنی ساخته می‌شد
+          await _confirm(t, 'SELECT 1 FROM $parentTable WHERE id = ?', [parentId],
+              'این ${meta.$2 ? 'دریافت' : 'پرداخت'} دیگر وجود ندارد؛ صفحه را ببندید و دوباره باز کنید.');
+          final count =
+              Sqflite.firstIntValue(await t.rawQuery('SELECT COUNT(*) FROM $table WHERE ${meta.$1}=?', [parentId])) ?? 0;
+          if (count >= max) throw Exception('حداکثر تعداد مجاز برای این بخش ($max) ثبت شده است');
+          final r = _txRow(row);
+          r[meta.$1] = parentId;
+          if (table == 'lump_tx' || table == 'receipt_lump_tx') r.putIfAbsent('paid', () => 1);
+          id = await t.insert(table, r);
+          await _queueByParent(t, meta.$2, parentId);
+          // تأیید قطعی داخل همان تراکنش: ردیف خوانده می‌شود و به والدش وصل است
+          await _confirm(t, 'SELECT 1 FROM $table x JOIN $parentTable pr ON pr.id = x.${meta.$1} WHERE x.id = ?', [id]);
+        }));
+    version.value++;
     return id;
   }
 
   Future<void> _updateTx(String table, int id, Map<String, dynamic> row) async {
     final meta = _txMeta[table]!;
-    final d = await db;
-    await d.transaction((t) async {
-      final cur = await t.query(table, columns: [meta.$1], where: 'id=?', whereArgs: [id]);
-      if (cur.isEmpty) return;
-      await t.update(table, _txRow(row), where: 'id=?', whereArgs: [id]);
-      await _queueByParent(t, meta.$2, (cur.first[meta.$1] as num).toInt());
-    });
+    await _write((d) => d.transaction((t) async {
+          final cur = await t.query(table, columns: [meta.$1], where: 'id=?', whereArgs: [id]);
+          if (cur.isEmpty) {
+            throw SaveNotConfirmed('این ردیف دیگر وجود ندارد (اطلاعات در این بین به‌روز شده). صفحه را ببندید و دوباره باز کنید.');
+          }
+          final n = await t.update(table, _txRow(row), where: 'id=?', whereArgs: [id]);
+          if (n < 1) throw SaveNotConfirmed();
+          await _queueByParent(t, meta.$2, (cur.first[meta.$1] as num).toInt());
+        }));
     version.value++;
   }
 
   Future<void> _deleteTx(String table, int id) async {
     final meta = _txMeta[table]!;
-    final d = await db;
-    await d.transaction((t) async {
-      final cur = await t.query(table, columns: [meta.$1], where: 'id=?', whereArgs: [id]);
-      if (cur.isEmpty) return;
-      await t.delete(table, where: 'id=?', whereArgs: [id]);
-      await _queueByParent(t, meta.$2, (cur.first[meta.$1] as num).toInt());
-    });
+    await _write((d) => d.transaction((t) async {
+          final cur = await t.query(table, columns: [meta.$1], where: 'id=?', whereArgs: [id]);
+          if (cur.isEmpty) return; // قبلاً حذف شده؛ همان نتیجهٔ دلخواه است
+          await t.delete(table, where: 'id=?', whereArgs: [id]);
+          await _queueByParent(t, meta.$2, (cur.first[meta.$1] as num).toInt());
+          await _confirm(t, 'SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM $table WHERE id = ?)', [id]);
+        }));
     version.value++;
   }
 
@@ -1949,9 +2121,8 @@ class AppDb {
     if (!const ['lump', 'staged'].contains(recvType) || !const [null, 'credit', 'cheque'].contains(stagedType)) {
       throw Exception('نوع دریافت نامعتبر است');
     }
-    final d = await db;
     late int rid;
-    await d.transaction((t) async {
+    await _write((d) => d.transaction((t) async {
       final rows = await t.query('receipts', where: 'sale_id=?', whereArgs: [saleId]);
       if (rows.isEmpty) {
         rid = await t.insert('receipts', {'sale_id': saleId, 'recv_type': recvType, 'staged_type': stagedType});
@@ -1967,7 +2138,9 @@ class AppDb {
             where: 'id=?', whereArgs: [rid]);
       }
       await _queueReceipt(t, saleId);
-    });
+      await _confirm(t, 'SELECT 1 FROM receipts WHERE id = ? AND sale_id = ?', [rid, saleId],
+          'ثبت نوع دریافت تأیید نشد؛ این فروش دیگر وجود ندارد.');
+    }));
     version.value++;
     return rid;
   }
@@ -2009,7 +2182,7 @@ class AppDb {
     for (final s in rows) {
       final items = await d.rawQuery('''
         SELECT si.weight, si.item_price, si.small_sacks, si.large_sacks, si.purchase_id AS purchase_id,
-               p.code AS code, p.price AS cost_price, p.price_usd AS cost_price_usd, p.type_name AS type_name, c.name AS category_name
+               p.code AS code, p.price AS cost_price, p.price_usd AS cost_price_usd, p.type_name AS type_name, p.base_type AS base_type, c.name AS category_name
         FROM sale_items si
         JOIN purchases p ON p.id = si.purchase_id
         JOIN categories c ON c.id = p.category_id
@@ -2183,22 +2356,34 @@ class AppDb {
   }
 
   Future<void> insertSale(Map<String, dynamic> sale, List<Map<String, dynamic>> items) async {
-    final d = await db;
-    await d.transaction((t) async {
-      final v = _saleValues(sale, items);
-      final sid = await _tempId(t, 'sales');
-      final ord = await _nextOrd(t, 'sales');
-      await _applySaleItems(t, sid, v.items);
-      await t.insert('sales', {...v.row, 'id': sid, 'created_at': _stamp(), 'ord': ord});
-      await _enqueue(t, 'sales.create', v.payload, refKind: 'sale', refId: sid, mapKind: 'sale', localId: sid);
-    });
+    // شناسهٔ موقتِ خرید ممکن است بعد از دریافت از سرور عوض شده باشد؛ اصلاحش می‌کنیم
+    final fixed = <Map<String, dynamic>>[];
+    for (final it in items) {
+      final m = Map<String, dynamic>.from(it);
+      final pid = (m['purchase_id'] as num?)?.toInt();
+      if (pid != null) m['purchase_id'] = await currentId('pur', pid);
+      fixed.add(m);
+    }
+    await _write((d) => d.transaction((t) async {
+          final v = _saleValues(sale, fixed);
+          final sid = await _tempId(t, 'sales');
+          final ord = await _nextOrd(t, 'sales');
+          await _applySaleItems(t, sid, v.items);
+          await t.insert('sales', {...v.row, 'id': sid, 'created_at': _stamp(), 'ord': ord});
+          await _enqueue(t, 'sales.create', v.payload, refKind: 'sale', refId: sid, mapKind: 'sale', localId: sid);
+          // تأیید قطعی داخل همان تراکنش
+          await _confirm(t, 'SELECT 1 FROM sales WHERE id = ?', [sid]);
+          await _confirm(t,
+              'SELECT 1 FROM sale_items si JOIN purchases p ON p.id = si.purchase_id WHERE si.sale_id = ?', [sid],
+              'فروش ثبت نشد؛ جنس انتخاب‌شده در انبار پیدا نشد.');
+          await _confirm(t, "SELECT 1 FROM sync_ops WHERE ref_kind='sale' AND ref_id=?", [sid]);
+        }));
     version.value++;
   }
 
   /// ویرایش فروش: وزن و گونیِ قبلی به همان خرید برمی‌گردد، سپس مقادیر جدید (دوباره اعتبارسنجی‌شده) اعمال می‌شود
   Future<void> updateSale(int saleId, Map<String, dynamic> sale, List<Map<String, dynamic>> items) async {
-    final d = await db;
-    await d.transaction((t) async {
+    await _write((d) => d.transaction((t) async {
       final curRows = await t.query('sales', where: 'id=?', whereArgs: [saleId]);
       if (curRows.isEmpty) throw Exception('این فروش یافت نشد');
       final merged = <String, dynamic>{};
@@ -2210,14 +2395,13 @@ class AppDb {
       await _applySaleItems(t, saleId, v.items);
       await t.update('sales', v.row, where: 'id=?', whereArgs: [saleId]);
       await _enqueue(t, 'sales.update', {'id': saleId, ...v.payload}, refKind: 'sale', refId: saleId);
-    });
+    }));
     version.value++;
   }
 
   /// حذف فروش و برگرداندن وزن و گونی به انبار
   Future<void> deleteSale(int id) async {
-    final d = await db;
-    await d.transaction((t) async {
+    await _write((d) => d.transaction((t) async {
       await _restoreSaleItems(t, id);
       await t.delete('sale_items', where: 'sale_id=?', whereArgs: [id]);
       await t.delete('sales', where: 'id=?', whereArgs: [id]);
@@ -2234,7 +2418,7 @@ class AppDb {
       } else {
         await _enqueue(t, 'sales.delete', {'id': id}, refKind: 'sale', refId: id);
       }
-    });
+    }));
     version.value++;
   }
 
@@ -2250,15 +2434,18 @@ class AppDb {
 
   /// وضعیت «پرداخت/دریافت شد» یک تراکنش (یکجا، قسط یا چک) را عوض می‌کند
   Future<void> setPaid(String table, int id, bool paid) async {
+    if (table == 'loan_dues') {
+      if (paid) await payLoanDue(id);
+      return;
+    }
     if (!_paidTables.contains(table)) throw ArgumentError('جدول نامعتبر');
     final meta = _txMeta[table]!;
-    final d = await db;
-    await d.transaction((t) async {
+    await _write((d) => d.transaction((t) async {
       final cur = await t.query(table, columns: [meta.$1], where: 'id=?', whereArgs: [id]);
-      if (cur.isEmpty) return;
+      if (cur.isEmpty) throw SaveNotConfirmed('این مورد دیگر وجود ندارد؛ صفحه را ببندید و دوباره باز کنید.');
       await t.update(table, {'paid': paid ? 1 : 0}, where: 'id=?', whereArgs: [id]);
       await _queueByParent(t, meta.$2, (cur.first[meta.$1] as num).toInt());
-    });
+    }));
     version.value++;
   }
 
@@ -2268,8 +2455,223 @@ class AppDb {
     final rows = await (await db).rawQuery(
         "SELECT TRIM(seller) AS n FROM purchases WHERE seller IS NOT NULL AND TRIM(seller) <> '' "
         "UNION SELECT TRIM(buyer) FROM sales WHERE buyer IS NOT NULL AND TRIM(buyer) <> '' "
+        "UNION SELECT TRIM(name) FROM parties WHERE TRIM(name) <> '' "
         "ORDER BY 1");
     return rows.map((r) => (r['n'] as String)).toList();
+  }
+
+
+  // ======================= طرف‌حساب‌ها و دفتر قرض/وام =======================
+  // نکته: مبالغ قرض/وام هرگز در سود و زیان حساب نمی‌شوند (جدولشان از فروش/خرید جداست).
+  // هر ردیف یک «uid» یکتا دارد تا ارسال تکراری به سرور (اینترنت ضعیف) دوبار ثبت نشود.
+
+  static String _partyNorm(String? name) => (name ?? '')
+      .replaceAll('ي', 'ی')
+      .replaceAll('ك', 'ک')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+
+  Future<List<Map<String, dynamic>>> partyRecords() async => (await db).query('parties', orderBy: 'name');
+
+  Future<List<Map<String, dynamic>>> loanEntries() async =>
+      (await db).query('loan_entries', orderBy: 'date DESC, id DESC');
+
+  /// تعریف طرف‌حساب جدید (بدون نیاز به خرید یا فروش)
+  Future<int> addParty(String name) async {
+    final n = _partyNorm(name);
+    if (n.isEmpty) throw Exception('نام طرف‌حساب را وارد کنید');
+    if (n.length > 100) throw Exception('نام طرف‌حساب حداکثر ۱۰۰ حرف باشد');
+    final existing = (await partyNames()).map(_partyNorm).toSet();
+    if (existing.contains(n)) throw Exception('طرف‌حسابی با این نام از قبل وجود دارد');
+    late int id;
+    await _write((d) => d.transaction((t) async {
+          id = await _tempId(t, 'parties');
+          await t.insert('parties', {'id': id, 'name': n});
+          await _enqueue(t, 'parties.create', {'name': n}, refKind: 'party', refId: id);
+          await _confirm(t, 'SELECT 1 FROM parties WHERE id = ? AND name = ?', [id, n]);
+          await _confirm(t, "SELECT 1 FROM sync_ops WHERE ref_kind='party' AND ref_id=?", [id]);
+        }));
+    version.value++;
+    return id;
+  }
+
+  /// مانده قرضِ باز یک طرف‌حساب: [base] = 'given' (طلب ما) یا 'taken' (بدهی ما)
+  Future<double> _loanOutstanding(DatabaseExecutor t, String party, String base) async {
+    final rep = base == 'given' ? 'repay_in' : 'repay_out';
+    final r = await t.rawQuery(
+        "SELECT COALESCE(SUM(CASE WHEN kind=? THEN amount WHEN kind=? THEN -amount ELSE 0 END), 0) AS v "
+        'FROM loan_entries WHERE party=?',
+        [base, rep, party]);
+    return (r.first['v'] as num).toDouble();
+  }
+
+  /// ثبت یک تراکنش دفتر قرض/وام:
+  ///  given = قرض اعطایی (ما به او داده‌ایم)    taken = قرض دریافتی (از او گرفته‌ایم)
+  ///  repay_in = بازپرداخت دریافتی (او پس داد)   repay_out = بازپرداخت پرداختی (ما پس دادیم)
+  /// [dues]: برای اعطا/دریافت قرض، تا ۲۰ سررسید {due_date, amount, note}؛ مبلغ و تاریخ سررسید الزامی است
+  /// و جمع مبلغ‌ها باید با مبلغ قرض برابر باشد. سررسیدها در صفحهٔ «سررسیدها» یادآوری می‌شوند.
+  Future<int> addLoanEntry({
+    required String party,
+    required String kind,
+    required double amount,
+    required DateTime date,
+    String? note,
+    List<Map<String, dynamic>> dues = const [],
+  }) async {
+    final p = _partyNorm(party);
+    if (p.isEmpty) throw Exception('طرف‌حساب مشخص نیست');
+    if (!kLoanKinds.contains(kind)) throw Exception('نوع تراکنش نامعتبر است');
+    if (amount <= 0 || amount > 1e13) throw Exception('مبلغ را درست وارد کنید');
+    final isRepay = kind == 'repay_in' || kind == 'repay_out';
+    if (isRepay && dues.isNotEmpty) throw Exception('برای بازپرداخت سررسید ثبت نمی‌شود');
+    if (dues.length > 20) throw Exception('حداکثر ۲۰ سررسید می‌توانید ثبت کنید');
+    final uid = _newIdem();
+    final dt = _dateOnly(date.toIso8601String());
+    final nt = _s(note, 500);
+    final amt = _r(amount, 2);
+    final cleanDues = <Map<String, dynamic>>[];
+    var sum = 0.0;
+    for (var i = 0; i < dues.length; i++) {
+      final a = _r((dues[i]['amount'] as num?)?.toDouble() ?? 0, 2);
+      if (a <= 0) throw Exception('مبلغ هر سررسید را وارد کنید');
+      final dd = dues[i]['due_date'];
+      if (dd == null) throw Exception('تاریخ هر سررسید را وارد کنید');
+      cleanDues.add({'seq': i + 1, 'due_date': _dateOnly('$dd'), 'amount': a, 'note': _s(dues[i]['note'], 200)});
+      sum += a;
+    }
+    if (cleanDues.isNotEmpty && (sum - amt).abs() > 0.5) {
+      throw Exception('جمع مبلغ سررسیدها (${_fmt(sum)}) باید برابر مبلغ قرض (${_fmt(amt)}) باشد');
+    }
+    late int id;
+    await _write((d) => d.transaction((t) async {
+          if (isRepay) {
+            final owed = await _loanOutstanding(t, p, kind == 'repay_in' ? 'given' : 'taken');
+            if (owed <= 0.5) throw Exception('بدهی برای بازپرداخت وجود ندارد');
+            if (amt > owed + 0.5) {
+              throw Exception('مبلغ بازپرداخت (${_fmt(amt)}) از مانده (${_fmt(owed)}) بیشتر است');
+            }
+          }
+          id = await _tempId(t, 'loan_entries');
+          await t.insert('loan_entries', {
+            'id': id,
+            'uid': uid,
+            'party': p,
+            'kind': kind,
+            'amount': amt,
+            'date': dt,
+            'note': nt,
+            'created_at': _stamp(),
+          });
+          for (final du in cleanDues) {
+            final did = await _tempId(t, 'loan_dues');
+            await t.insert('loan_dues', {'id': did, 'loan_uid': uid, ...du, 'paid': 0});
+          }
+          await _enqueue(
+              t,
+              'loans.create',
+              {
+                'uid': uid,
+                'party': p,
+                'kind': kind,
+                'amount': amt,
+                'date': dt,
+                'note': nt,
+                if (cleanDues.isNotEmpty) 'dues': cleanDues,
+              },
+              refKind: 'loan',
+              refId: id);
+          await _confirm(t, 'SELECT 1 FROM loan_entries WHERE id = ? AND uid = ? AND amount = ?', [id, uid, amt]);
+          final dc = Sqflite.firstIntValue(await t.rawQuery('SELECT COUNT(*) FROM loan_dues WHERE loan_uid = ?', [uid])) ?? 0;
+          if (dc != cleanDues.length) throw SaveNotConfirmed();
+          await _confirm(t, "SELECT 1 FROM sync_ops WHERE ref_kind='loan' AND ref_id=?", [id]);
+        }));
+    version.value++;
+    return id;
+  }
+
+  Future<void> deleteLoanEntry(int id) async {
+    await _write((d) => d.transaction((t) async {
+          final cur = await t.query('loan_entries', columns: ['uid'], where: 'id=?', whereArgs: [id]);
+          if (cur.isEmpty) return; // قبلاً حذف شده
+          final uid = cur.first['uid'] as String;
+          await t.delete('loan_dues', where: 'loan_uid=?', whereArgs: [uid]);
+          await t.delete('loan_entries', where: 'id=?', whereArgs: [id]);
+          // اگر ارسالِ «ثبت» هنوز در صف است، اول آن را بردار؛ حذف سمت سرور همیشه (idempotent) در صف می‌رود
+          await t.delete('sync_ops',
+              where: "action='loans.create' AND ref_kind='loan' AND ref_id=? AND state='pending'", whereArgs: [id]);
+          await _enqueue(t, 'loans.delete', {'uid': uid}, refKind: 'loan', refId: id);
+          await _confirm(t, 'SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM loan_entries WHERE id = ?)', [id]);
+        }));
+    version.value++;
+  }
+
+  /// سررسیدهای قرض (برای صفحهٔ سررسیدها و اعلان‌ها). پیش‌فرض: فقط پرداخت‌نشده‌هایی که قرضشان هنوز باز است.
+  Future<List<Map<String, dynamic>>> loanDueRows({bool includePaid = false}) async {
+    final d = await db;
+    final rows = await d.rawQuery(
+        'SELECT x.id AS id, x.seq AS seq, x.due_date AS due_date, x.amount AS amount, x.note AS note, x.paid AS paid, '
+        'l.kind AS kind, l.party AS party, l.date AS loan_date '
+        'FROM loan_dues x JOIN loan_entries l ON l.uid = x.loan_uid '
+        '${includePaid ? '' : 'WHERE x.paid = 0 '}'
+        'ORDER BY x.due_date, x.id');
+    final cache = <String, double>{};
+    final out = <Map<String, dynamic>>[];
+    for (final r in rows) {
+      final paid = ((r['paid'] as num?) ?? 0) == 1;
+      if (!paid) {
+        final key = '${r['kind']}|${r['party']}';
+        cache[key] ??= await _loanOutstanding(d, r['party'] as String, r['kind'] as String);
+        if (cache[key]! <= 0.5) continue; // قرض کاملاً تسویه شده؛ یادآوری لازم نیست
+      }
+      out.add(r);
+    }
+    return out;
+  }
+
+  Future<List<Map<String, dynamic>>> unpaidLoanDues() => loanDueRows();
+
+  /// «پرداخت/دریافت شد» برای یک سررسید قرض: سررسید بسته می‌شود و بازپرداخت متناظر
+  /// (حداکثر تا مانده‌ی قرض) خودکار در دفتر ثبت می‌شود.
+  Future<void> payLoanDue(int dueId) async {
+    await _write((d) => d.transaction((t) async {
+          final dr = await t.query('loan_dues', where: 'id=?', whereArgs: [dueId]);
+          if (dr.isEmpty) throw SaveNotConfirmed('این سررسید دیگر وجود ندارد؛ صفحه را ببندید و دوباره باز کنید.');
+          final due = dr.first;
+          if (((due['paid'] as num?) ?? 0) == 1) return;
+          final lr = await t.query('loan_entries', where: 'uid=?', whereArgs: [due['loan_uid']]);
+          if (lr.isEmpty) throw SaveNotConfirmed('قرضِ مربوط به این سررسید دیگر وجود ندارد.');
+          final loan = lr.first;
+          final kind = loan['kind'] as String;
+          final party = loan['party'] as String;
+          final owed = await _loanOutstanding(t, party, kind);
+          final pay = math.min((due['amount'] as num).toDouble(), owed);
+          await t.update('loan_dues', {'paid': 1}, where: 'id=?', whereArgs: [dueId]);
+          await _enqueue(t, 'loans.due_paid', {'loan_uid': due['loan_uid'], 'seq': due['seq']},
+              refKind: 'loandue', refId: dueId);
+          if (pay > 0.5) {
+            final uid = _newIdem();
+            final rid = await _tempId(t, 'loan_entries');
+            final repayKind = kind == 'given' ? 'repay_in' : 'repay_out';
+            final dt = _ymd(DateTime.now());
+            final nt = 'تسویهٔ سررسید ${due['seq']}';
+            final amt = _r(pay, 2);
+            await t.insert('loan_entries', {
+              'id': rid,
+              'uid': uid,
+              'party': party,
+              'kind': repayKind,
+              'amount': amt,
+              'date': dt,
+              'note': nt,
+              'created_at': _stamp(),
+            });
+            await _enqueue(t, 'loans.create',
+                {'uid': uid, 'party': party, 'kind': repayKind, 'amount': amt, 'date': dt, 'note': nt},
+                refKind: 'loan', refId: rid);
+          }
+          await _confirm(t, 'SELECT 1 FROM loan_dues WHERE id = ? AND paid = 1', [dueId]);
+        }));
+    version.value++;
   }
 
   /// آیا هنوز هیچ خرید یا فروشی ثبت نشده؟

@@ -48,7 +48,7 @@ class SaleForm extends StatefulWidget {
   State<SaleForm> createState() => _SaleFormState();
 }
 
-class _SaleFormState extends State<SaleForm> {
+class _SaleFormState extends State<SaleForm> with EditGuard<SaleForm> {
   final _form = GlobalKey<FormState>();
   List<Map<String, dynamic>> _lots = [];
   int? _selId;
@@ -204,11 +204,11 @@ class _SaleFormState extends State<SaleForm> {
     }
     final net = _net;
     if (net <= 0) {
-      snack(context, 'وزن خالص باید بیشتر از صفر باشد (وزن گونی‌ها از وزن کل بیشتر است؟)');
+      snack(context, 'وزن (خالص) باید بیشتر از صفر باشد (وزن گونی‌ها از وزن کل (ناخالص) بیشتر است؟)');
       return;
     }
     if (net > _rem + 1e-6) {
-      snack(context, 'وزن «${lot['type_name']}» از موجودی آن (${faNum(_rem)} کیلو) بیشتر است');
+      snack(context, 'وزن (خالص) «${lot['type_name']}» از موجودی آن (${faNum(_rem)} کیلو) بیشتر است');
       return;
     }
     final smallN = _smallN;
@@ -253,20 +253,21 @@ class _SaleFormState extends State<SaleForm> {
     };
 
     setState(() => _saving = true);
-    try {
-      if (_isEdit) {
-        await AppDb.I.updateSale(widget.editSaleId!, saleData, items);
-      } else {
-        saleData['date'] = DateTime.now().toIso8601String();
-        await AppDb.I.insertSale(saleData, items);
-      }
-      if (mounted) Navigator.pop(context);
-    } catch (e) {
-      if (mounted) {
-        setState(() => _saving = false);
-        snack(context, '$e'.replaceFirst('Exception: ', ''));
-      }
-    }
+    if (!_isEdit) saleData['date'] = DateTime.now().toIso8601String();
+    final ok = await saveConfirmed(
+      context,
+      () async {
+        if (_isEdit) {
+          await AppDb.I.updateSale(widget.editSaleId!, saleData, items);
+        } else {
+          await AppDb.I.insertSale(saleData, items);
+        }
+      },
+      successMsg: _isEdit ? 'ویرایش فروش با موفقیت ثبت شد' : 'فروش با موفقیت ثبت شد',
+    );
+    if (!mounted) return;
+    setState(() => _saving = false);
+    if (ok) Navigator.pop(context);
   }
 
   // ------------------------- رابط کاربری -------------------------
@@ -384,7 +385,7 @@ class _SaleFormState extends State<SaleForm> {
         subtitle: Text(
           'کد پسته: ${e['code'] ?? '-'}  •  خرید ${jalaliDate(e['date'] as String)}  •  فی ${faNum(e['price'] as num, dec: 0)}'
           '${_fx && e['price_usd'] != null ? ' (${faUsd(e['price_usd'] as num, dec: 4)})' : ''}\n'
-          'موجودی ${faNum(rem)} کیلو  •  گونی مانده: کوچک ${faNum(e['small_left'] as num)} / بزرگ ${faNum(e['large_left'] as num)}',
+          'موجودی (خالص) ${faNum(rem)} کیلو  •  گونی مانده: کوچک ${faNum(e['small_left'] as num)} / بزرگ ${faNum(e['large_left'] as num)}',
         ),
         isThreeLine: true,
       ),
@@ -419,7 +420,7 @@ class _SaleFormState extends State<SaleForm> {
   /// وزن واقعی (کل، با گونی) + گونی‌های خالی‌شده (اختیاری)
   Widget _weighFields(Map<String, dynamic> lot) {
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      numField(_gross, 'وزن کل (با گونی) — طبق ترازو', required: true, onChanged: _changed),
+      numField(_gross, 'وزن کل (ناخالص - با گونی) — طبق ترازو', required: true, onChanged: _changed),
       Align(
         alignment: Alignment.centerLeft,
         child: TextButton.icon(
@@ -455,10 +456,10 @@ class _SaleFormState extends State<SaleForm> {
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(children: [
-          infoRow('موجودی این خرید', '${faNum(_rem)} کیلو'),
-          infoRow('وزن کل (با گونی)', '${faNum(_grossKg)} کیلو'),
+          infoRow('موجودی این خرید (خالص)', '${faNum(_rem)} کیلو'),
+          infoRow('وزن کل (ناخالص - با گونی)', '${faNum(_grossKg)} کیلو'),
           infoRow('وزن گونی‌ها', '${faNum(_tare)} کیلو'),
-          infoRow('وزن خالص پسته', '${faNum(_net)} کیلو', valueColor: over ? scheme.error : null),
+          infoRow('وزن پسته (خالص)', '${faNum(_net)} کیلو', valueColor: over ? scheme.error : null),
           infoRow('مبلغ فروش تقریبی', '${faNum(_revenue, dec: 0)} تومان'),
           if (_fx && _salePerKgUsd != null) ...[
             infoRow('فی فروش به دلار (هر کیلو)', faUsd(_salePerKgUsd!, dec: 4)),
@@ -476,12 +477,12 @@ class _SaleFormState extends State<SaleForm> {
           if (tooHeavy)
             Padding(
               padding: const EdgeInsets.only(top: 6),
-              child: Text('وزن گونی‌ها از وزن کل بیشتر یا مساوی آن است', style: TextStyle(color: scheme.error)),
+              child: Text('وزن گونی‌ها از وزن کل (ناخالص) بیشتر یا مساوی آن است', style: TextStyle(color: scheme.error)),
             ),
           if (over)
             Padding(
               padding: const EdgeInsets.only(top: 6),
-              child: Text('وزن «${_selLot?['type_name']}» از موجودی آن (${faNum(_rem)} کیلو) بیشتر است',
+              child: Text('وزن (خالص) «${_selLot?['type_name']}» از موجودی آن (${faNum(_rem)} کیلو) بیشتر است',
                   style: TextStyle(color: scheme.error)),
             ),
         ]),

@@ -30,7 +30,7 @@ class MixForm extends StatefulWidget {
   State<MixForm> createState() => _MixFormState();
 }
 
-class _MixFormState extends State<MixForm> {
+class _MixFormState extends State<MixForm> with EditGuard<MixForm> {
   final _form = GlobalKey<FormState>();
   List<Map<String, dynamic>> _lots = [];
   final Map<int, bool> _sel = {};
@@ -43,6 +43,8 @@ class _MixFormState extends State<MixForm> {
 
   List<Map<String, dynamic>> _categories = [];
   int? _categoryId;
+  List<Map<String, dynamic>> _baseTypes = []; // انواع پسته‌ی دستهٔ انتخاب‌شده (زیردسته)
+  String? _baseType; // نوع زیردسته‌ی انتخاب‌شده (برای دقیق‌تر شدن نمودارها)
   final _typeName = TextEditingController();
   final _netWeight = TextEditingController();
   final _smallSack = TextEditingController();
@@ -70,6 +72,7 @@ class _MixFormState extends State<MixForm> {
       _categoryId = cats.isNotEmpty ? cats.first['id'] as int : null;
       _loading = false;
     });
+    await _loadBaseTypes();
     if (_isEdit) {
       final e = widget.existing!;
       final sources = await AppDb.I.mixSourcesOf(e['id'] as int);
@@ -81,6 +84,8 @@ class _MixFormState extends State<MixForm> {
       _gram.text = e['gram'] == null ? '' : plain(e['gram'] as num);
       _note.text = e['note'] as String? ?? '';
       _categoryId = e['category_id'] as int?;
+      _baseType = e['base_type'] as String?;
+      await _loadBaseTypes();
       var takenOld = 0.0;
       for (final source in sources) {
         final id = source['source_purchase_id'] as int;
@@ -141,15 +146,15 @@ class _MixFormState extends State<MixForm> {
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          infoRow('برداشته‌شده', '${faNum(_takenSum)} کیلو'),
-          infoRow('خالص + ضایعات', '${faNum(net + waste)} کیلو'),
+          infoRow('برداشته‌شده (خالص)', '${faNum(_takenSum)} کیلو'),
+          infoRow('وزن (خالص) + ضایعات', '${faNum(net + waste)} کیلو'),
           const SizedBox(height: 4),
           Text(
             ok
                 ? '✓ وزن‌ها برابرند'
                 : (diff > 0
                     ? '${faNum(diff)} کیلو اختلاف ثبت‌نشده دارید؛ اگر خاک یا ضایعات بوده در «ضایعات» وارد کنید'
-                    : 'وزن خالص + ضایعات به اندازهٔ ${faNum(-diff)} کیلو از وزن برداشته‌شده بیشتر است'),
+                    : 'وزن (خالص) + ضایعات به اندازهٔ ${faNum(-diff)} کیلو از وزن برداشته‌شده بیشتر است'),
             style: TextStyle(color: ok ? Colors.green.shade700 : scheme.error),
           ),
         ]),
@@ -170,7 +175,7 @@ class _MixFormState extends State<MixForm> {
       final rem = (e['remaining'] as num).toDouble();
       final w = parseNum(_rows[id]?.weight.text) ?? 0;
       if (w > rem + 1e-6) {
-        return 'وزن برداشته‌شده از «${e['type_name']}» بیشتر از موجودی آن (${faNum(rem)} کیلو) است';
+        return 'وزن برداشته‌شده از «${e['type_name']}» بیشتر از موجودی آن (${faNum(rem)} کیلو (خالص)) است';
       }
       final sl = (e['small_left'] as num).toDouble();
       final ll = (e['large_left'] as num).toDouble();
@@ -205,6 +210,10 @@ class _MixFormState extends State<MixForm> {
       snack(context, 'دسته را انتخاب کنید');
       return;
     }
+    if (_baseType == null || _baseType!.isEmpty) {
+      snack(context, 'نوع پسته (زیردسته) را انتخاب کنید');
+      return;
+    }
     if (_typeName.text.trim().isEmpty) {
       snack(context, 'نام/نوع مخلوط را وارد کنید');
       return;
@@ -221,7 +230,7 @@ class _MixFormState extends State<MixForm> {
           context,
           diff > 0
               ? '${faNum(diff)} کیلو اختلاف ثبت‌نشده دارید؛ اگر خاک یا ضایعات بوده در «ضایعات» وارد کنید'
-              : 'وزن خالص + ضایعات به اندازهٔ ${faNum(-diff)} کیلو از وزن برداشته‌شده بیشتر است');
+              : 'وزن (خالص) + ضایعات به اندازهٔ ${faNum(-diff)} کیلو از وزن برداشته‌شده بیشتر است');
       return;
     }
     setState(() => _saving = true);
@@ -242,6 +251,7 @@ class _MixFormState extends State<MixForm> {
       final args = {
         'categoryId': _categoryId!,
         'typeName': _typeName.text.trim(),
+        'baseType': _baseType,
         'sources': sources,
         'netWeight': net,
         'smallSackCount': parseNum(_smallSack.text) ?? 0.0,
@@ -251,11 +261,13 @@ class _MixFormState extends State<MixForm> {
         'waste': waste,
         'note': _note.text.trim().isEmpty ? null : _note.text.trim(),
       };
+      final ok = await saveConfirmed(context, () async {
       if (_isEdit) {
         await AppDb.I.updateMix(
           mixPurchaseId: widget.existing!['id'] as int,
           categoryId: args['categoryId'] as int,
           typeName: args['typeName'] as String,
+          baseType: args['baseType'] as String?,
           sources: sources,
           netWeight: net,
           smallSackCount: args['smallSackCount'] as double,
@@ -269,6 +281,7 @@ class _MixFormState extends State<MixForm> {
         await AppDb.I.createMix(
           categoryId: args['categoryId'] as int,
           typeName: args['typeName'] as String,
+          baseType: args['baseType'] as String?,
           sources: sources,
           netWeight: net,
           smallSackCount: args['smallSackCount'] as double,
@@ -279,10 +292,8 @@ class _MixFormState extends State<MixForm> {
           note: args['note'] as String?,
         );
       }
-      if (mounted) {
-        snack(context, _isEdit ? 'مخلوط/جداسازی ویرایش شد' : 'با موفقیت به انبار اضافه شد');
-        Navigator.pop(context);
-      }
+      }, successMsg: _isEdit ? 'مخلوط/جداسازی با موفقیت ویرایش شد' : 'مخلوط با موفقیت به انبار اضافه شد');
+      if (mounted && ok) Navigator.pop(context);
     } catch (e) {
       if (mounted) snack(context, e.toString().replaceFirst('Exception: ', ''));
     } finally {
@@ -323,17 +334,7 @@ class _MixFormState extends State<MixForm> {
               color: scheme.primaryContainer,
               child: const Padding(
                 padding: EdgeInsets.all(12),
-                child: Text(
-                  'از بین اجناس موجود در انبار انتخاب کنید و از هرکدام هرچقدر می‌خواهید بردارید.\n'
-                  '• مخلوط: چند جنس را با هم قاطی کنید تا یک قلم تازه ساخته شود.\n'
-                  '• جداسازی: فقط یک جنس را انتخاب کنید، بخشی از آن را (مثلاً دنبست یا خندانِ جداشده) '
-                  'بردارید و با نام و مشخصات تازه ثبت کنید؛ برای بخش بعدی همین کار را دوباره انجام دهید '
-                  'تا هر بخش جدا ثبت شود.\n'
-                  'در پایان وزن نهایی (طبق ترازو) و تعداد گونی را وارد کنید. اگر وزن نهایی از وزن '
-                  'برداشته‌شده کمتر شد (خاک، پوست و...)، اختلاف را در «ضایعات» ثبت کنید. '
-                  'فیِ قلم تازه = هزینهٔ کل جنس‌های برداشته‌شده ÷ وزن خالص، یعنی هزینهٔ ضایعات هم در فی لحاظ می‌شود. '
-                  'موقع فروش هر قلم تازه جدا انتخاب می‌شود.',
-                ),
+                child: Text('هزینه ضایعات به صورت میانگین از سود همه اجناس جدا/مخلوط شده کم می‌شود.'),
               ),
             ),
             const SizedBox(height: 12),
@@ -365,7 +366,7 @@ class _MixFormState extends State<MixForm> {
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(12),
-                  child: infoRow('جمع وزن برداشته‌شده', '${faNum(_takenSum)} کیلو'),
+                  child: infoRow('جمع وزن برداشته‌شده (خالص)', '${faNum(_takenSum)} کیلو'),
                 ),
               ),
               const SizedBox(height: 8),
@@ -380,7 +381,13 @@ class _MixFormState extends State<MixForm> {
                         .map((c) =>
                             DropdownMenuItem(value: c['id'] as int, child: Text(c['name'] as String)))
                         .toList(),
-                    onChanged: (v) => setState(() => _categoryId = v),
+                    onChanged: (v) {
+                      setState(() {
+                        _categoryId = v;
+                        _baseType = null;
+                      });
+                      _loadBaseTypes();
+                    },
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -391,8 +398,31 @@ class _MixFormState extends State<MixForm> {
                 ),
               ]),
               const SizedBox(height: 12),
-              textField(_typeName, 'نام قلم تازه (مثلاً «دنبست جداشده» یا «کوت‌ریزی مخلوط»)', required: true),
-              numField(_netWeight, 'وزن خالص نهایی (کیلو) — طبق ترازو',
+              Row(children: [
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    value: _baseType,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                        labelText: 'نوع پسته (زیردسته)',
+                        helperText: 'مشخص می‌کند این قلم در نمودارها جزو کدام نوع پسته حساب شود',
+                        border: OutlineInputBorder()),
+                    items: _baseTypes
+                        .map((t) => DropdownMenuItem<String>(value: t['name'] as String, child: Text(t['name'] as String)))
+                        .toList(),
+                    onChanged: (v) => setState(() => _baseType = v),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton.filledTonal(
+                  onPressed: _addBaseType,
+                  icon: const Icon(Icons.add),
+                  tooltip: 'افزودن نوع',
+                ),
+              ]),
+              const SizedBox(height: 12),
+              textField(_typeName, 'نام قلم تازه (مثلاً «کوت‌ریز» یا «دنبست جداشده»)', required: true),
+              numField(_netWeight, 'وزن نهایی (خالص) به کیلو — طبق ترازو',
                   required: true, onChanged: () => setState(() {})),
               numField(_waste, 'ضایعات / خاک (کیلو) — وزنِ کم‌شده هنگام مخلوط/جداسازی',
                   hint: '0', onChanged: () => setState(() {})),
@@ -448,7 +478,7 @@ class _MixFormState extends State<MixForm> {
         value: _sel[id] ?? false,
         onChanged: (v) => _toggle(id, v ?? false),
         title: Text('${e['category_name']} - ${e['type_name']}'),
-        subtitle: Text('کد ${e['code'] ?? '-'}  •  موجودی ${faNum(rem)} کیلو  •  فی ${faNum(e['price'] as num, dec: 0)}'
+        subtitle: Text('کد ${e['code'] ?? '-'}  •  موجودی (خالص) ${faNum(rem)} کیلو  •  فی ${faNum(e['price'] as num, dec: 0)}'
             '${LicenseService.I.isFx.value && e['price_usd'] != null ? ' (${faUsd(e['price_usd'] as num, dec: 3)})' : ''}'),
       ),
     );
@@ -468,7 +498,7 @@ class _MixFormState extends State<MixForm> {
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Text('${e['category_name']} - ${e['type_name']}',
               style: Theme.of(context).textTheme.titleSmall),
-          Text('موجودی ${faNum(rem)} کیلو', style: const TextStyle(color: Colors.black54)),
+          Text('موجودی (خالص) ${faNum(rem)} کیلو', style: const TextStyle(color: Colors.black54)),
           const SizedBox(height: 8),
           Align(
             alignment: Alignment.centerLeft,
@@ -487,7 +517,7 @@ class _MixFormState extends State<MixForm> {
             controller: r.weight,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             decoration: const InputDecoration(
-              labelText: 'وزنی که از این جنس برمی‌دارید (کیلو)',
+              labelText: 'وزنی که از این جنس برمی‌دارید (خالص) به کیلو',
               border: OutlineInputBorder(),
             ),
             onChanged: (_) => setState(() {}),
@@ -559,6 +589,42 @@ class _MixFormState extends State<MixForm> {
     });
   }
 
+  Future<void> _loadBaseTypes() async {
+    final id = _categoryId;
+    final list = id == null ? <Map<String, dynamic>>[] : await AppDb.I.typesOf(id);
+    if (!mounted) return;
+    setState(() {
+      _baseTypes = list;
+      if (_baseType != null && !list.any((t) => t['name'] == _baseType)) _baseType = null;
+    });
+  }
+
+  Future<void> _addBaseType() async {
+    final cid = _categoryId;
+    if (cid == null) {
+      snack(context, 'اول دسته را انتخاب کنید');
+      return;
+    }
+    final c = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('افزودن نوع پسته جدید'),
+        content: TextField(controller: c, autofocus: true, decoration: const InputDecoration(labelText: 'نام نوع (مثلاً دنبست)')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('انصراف')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('افزودن')),
+        ],
+      ),
+    );
+    c.dispose();
+    if (name == null || name.isEmpty) return;
+    final ok = await saveConfirmed(context, () => AppDb.I.addType(cid, name), successMsg: 'نوع «$name» اضافه شد');
+    if (!ok) return;
+    _baseType = name;
+    await _loadBaseTypes();
+  }
+
   Future<void> _addCategory() async {
     final c = TextEditingController();
     final name = await showDialog<String>(
@@ -576,6 +642,7 @@ class _MixFormState extends State<MixForm> {
     if (name == null || name.isEmpty) return;
     final id = await AppDb.I.addCategory(name);
     final cats = await AppDb.I.categories();
-    if (mounted) setState(() { _categories = cats; _categoryId = id; });
+    if (mounted) setState(() { _categories = cats; _categoryId = id; _baseType = null; });
+    await _loadBaseTypes();
   }
 }

@@ -57,7 +57,11 @@ class LicenseGateState extends State<LicenseGate> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) refresh();
+    if (state == AppLifecycleState.resumed) {
+      // بعد از قفل صفحه/خواب سیستم: مطمئن شو دیتابیس باز و سالم است تا ثبت بعدی ناموفق نشود
+      AppDb.I.ensureHealthy();
+      refresh();
+    }
   }
 
   /// دیتابیس حساب را باز می‌کند؛ اگر این دستگاه هنوز داده‌های حساب را نگرفته (ورود اول /

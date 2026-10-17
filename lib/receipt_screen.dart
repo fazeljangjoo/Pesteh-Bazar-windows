@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'db.dart';
 import 'notify_service.dart';
+import 'pdf_output.dart';
 import 'pdf_service.dart';
 import 'utils.dart';
 import 'widgets.dart';
@@ -16,7 +17,7 @@ class ReceiptScreen extends StatefulWidget {
   State<ReceiptScreen> createState() => _ReceiptScreenState();
 }
 
-class _ReceiptScreenState extends State<ReceiptScreen> {
+class _ReceiptScreenState extends State<ReceiptScreen> with EditGuard<ReceiptScreen> {
   bool _loading = true;
   late int _saleId;
   int? _receiptId;
@@ -118,7 +119,12 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
 
   Future<void> _setType(String recvType, String? stagedType) async {
     _saleId = await AppDb.I.currentId('sale', _saleId);
-    _receiptId = await AppDb.I.setReceiptType(_saleId, recvType, stagedType);
+    int? newId;
+    if (!await saveConfirmed(context, () async { newId = await AppDb.I.setReceiptType(_saleId, recvType, stagedType); },
+        successMsg: 'نوع دریافت ثبت شد')) {
+      return;
+    }
+    _receiptId = newId;
     setState(() {
       _recvType = recvType;
       _stagedType = stagedType;
@@ -148,7 +154,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
           toName: 'دریافت‌کننده'
         ),
       );
-      await PdfService.share(file);
+      await PdfOutput.show(context, file);
     } catch (e) {
       if (mounted) snack(context, 'خطا در ساخت PDF: $e');
     }
@@ -165,7 +171,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
       builder: (_) => _ReceiptLumpForm(total: _total, others: _othersSum(_lump, null)),
     );
     if (row == null) return;
-    await AppDb.I.addReceiptLumpTx(_receiptId!, row);
+    if (!await saveConfirmed(context, () => AppDb.I.addReceiptLumpTx(_receiptId!, row), successMsg: 'تراکنش دریافت با موفقیت ثبت شد')) return;
     await _load();
   }
 
@@ -176,14 +182,14 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
       builder: (_) => _ReceiptLumpForm(existing: existing, total: _total, others: _othersSum(_lump, existing['id'] as int?)),
     );
     if (row == null) return;
-    await AppDb.I.updateReceiptLumpTx(existing['id'] as int, row);
+    if (!await saveConfirmed(context, () => AppDb.I.updateReceiptLumpTx(existing['id'] as int, row), successMsg: 'ویرایش با موفقیت ثبت شد')) return;
     await _load();
   }
 
   Future<void> _toggleLumpPaid(Map<String, dynamic> row, bool paid) async {
     final updated = Map<String, dynamic>.from(row)..remove('id')..remove('receipt_id');
     updated['paid'] = paid ? 1 : 0;
-    await AppDb.I.updateReceiptLumpTx(row['id'] as int, updated);
+    if (!await saveConfirmed(context, () => AppDb.I.updateReceiptLumpTx(row['id'] as int, updated), successMsg: 'وضعیت تسویه با موفقیت ثبت شد')) return;
     await _load();
   }
 
@@ -198,7 +204,8 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
       builder: (_) => _ReceiptCreditForm(total: _total, others: _othersSum(_credit, null)),
     );
     if (row == null) return;
-    final id = await AppDb.I.addReceiptCreditInst(_receiptId!, row);
+    int? id;
+    if (!await saveConfirmed(context, () async { id = await AppDb.I.addReceiptCreditInst(_receiptId!, row); }, successMsg: 'قسط دریافت با موفقیت ثبت شد')) return;
     if (id != null) {
       await NotifyService.I.scheduleReceiptCreditRow({...row, 'id': id});
     }
@@ -212,7 +219,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
       builder: (_) => _ReceiptCreditForm(existing: existing, total: _total, others: _othersSum(_credit, existing['id'] as int?)),
     );
     if (row == null) return;
-    await AppDb.I.updateReceiptCreditInst(existing['id'] as int, row);
+    if (!await saveConfirmed(context, () => AppDb.I.updateReceiptCreditInst(existing['id'] as int, row), successMsg: 'ویرایش با موفقیت ثبت شد')) return;
     if (row['paid'] == 1) {
       await NotifyService.I.cancelReceiptCreditRow(existing['id'] as int);
     } else {
@@ -224,7 +231,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
   Future<void> _toggleCreditPaid(Map<String, dynamic> row, bool paid) async {
     final updated = Map<String, dynamic>.from(row)..remove('id')..remove('receipt_id');
     updated['paid'] = paid ? 1 : 0;
-    await AppDb.I.updateReceiptCreditInst(row['id'] as int, updated);
+    if (!await saveConfirmed(context, () => AppDb.I.updateReceiptCreditInst(row['id'] as int, updated), successMsg: 'وضعیت تسویه با موفقیت ثبت شد')) return;
     if (paid) {
       await NotifyService.I.cancelReceiptCreditRow(row['id'] as int);
     } else {
@@ -244,7 +251,8 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
       builder: (_) => _ReceiptChequeForm(total: _total, others: _othersSum(_cheque, null)),
     );
     if (row == null) return;
-    final id = await AppDb.I.addReceiptChequeInst(_receiptId!, row);
+    int? id;
+    if (!await saveConfirmed(context, () async { id = await AppDb.I.addReceiptChequeInst(_receiptId!, row); }, successMsg: 'چک دریافت با موفقیت ثبت شد')) return;
     if (id != null) {
       await NotifyService.I.scheduleReceiptChequeRow({...row, 'id': id});
     }
@@ -258,7 +266,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
       builder: (_) => _ReceiptChequeForm(existing: existing, total: _total, others: _othersSum(_cheque, existing['id'] as int?)),
     );
     if (row == null) return;
-    await AppDb.I.updateReceiptChequeInst(existing['id'] as int, row);
+    if (!await saveConfirmed(context, () => AppDb.I.updateReceiptChequeInst(existing['id'] as int, row), successMsg: 'ویرایش با موفقیت ثبت شد')) return;
     if (row['paid'] == 1) {
       await NotifyService.I.cancelReceiptChequeRow(existing['id'] as int);
     } else {
@@ -270,7 +278,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
   Future<void> _toggleChequePaid(Map<String, dynamic> row, bool paid) async {
     final updated = Map<String, dynamic>.from(row)..remove('id')..remove('receipt_id');
     updated['paid'] = paid ? 1 : 0;
-    await AppDb.I.updateReceiptChequeInst(row['id'] as int, updated);
+    if (!await saveConfirmed(context, () => AppDb.I.updateReceiptChequeInst(row['id'] as int, updated), successMsg: 'وضعیت تسویه با موفقیت ثبت شد')) return;
     if (paid) {
       await NotifyService.I.cancelReceiptChequeRow(row['id'] as int);
     } else {
@@ -384,7 +392,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
               icon: const Icon(Icons.delete_outline),
               onPressed: () async {
                 if (await confirm(context, 'این تراکنش حذف شود؟')) {
-                  await AppDb.I.deleteReceiptLumpTx(r['id'] as int);
+                  await saveConfirmed(context, () => AppDb.I.deleteReceiptLumpTx(r['id'] as int), successMsg: 'حذف شد');
                   await _load();
                 }
               },
@@ -418,7 +426,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
               onPressed: () async {
                 if (await confirm(context, 'این قسط حذف شود؟')) {
                   await NotifyService.I.cancelReceiptCreditRow(r['id'] as int);
-                  await AppDb.I.deleteReceiptCreditInst(r['id'] as int);
+                  await saveConfirmed(context, () => AppDb.I.deleteReceiptCreditInst(r['id'] as int), successMsg: 'حذف شد');
                   await _load();
                 }
               },
@@ -453,7 +461,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
               onPressed: () async {
                 if (await confirm(context, 'این چک حذف شود؟')) {
                   await NotifyService.I.cancelReceiptChequeRow(r['id'] as int);
-                  await AppDb.I.deleteReceiptChequeInst(r['id'] as int);
+                  await saveConfirmed(context, () => AppDb.I.deleteReceiptChequeInst(r['id'] as int), successMsg: 'حذف شد');
                   await _load();
                 }
               },
