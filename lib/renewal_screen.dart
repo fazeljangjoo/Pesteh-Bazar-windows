@@ -65,7 +65,13 @@ class _RenewalScreenState extends State<RenewalScreen> with WidgetsBindingObserv
 
   final _payerCtl = TextEditingController();
   final _last4Ctl = TextEditingController();
-  final _paidAtCtl = TextEditingController();
+  // تاریخ و ساعت پرداخت (شمسی) با لیست‌های انتخاب
+  final List<int> _todayJ = gregorianToJalali(DateTime.now().year, DateTime.now().month, DateTime.now().day);
+  late int _payJy = _todayJ[0];
+  late int _payJm = _todayJ[1];
+  late int _payJd = _todayJ[2];
+  late int _payHour = DateTime.now().hour;
+  late int _payMin = DateTime.now().minute;
   final _amountCtl = TextEditingController();
   final _trackCtl = TextEditingController();
 
@@ -136,7 +142,6 @@ class _RenewalScreenState extends State<RenewalScreen> with WidgetsBindingObserv
     _codeCtl.dispose();
     _payerCtl.dispose();
     _last4Ctl.dispose();
-    _paidAtCtl.dispose();
     _amountCtl.dispose();
     _trackCtl.dispose();
     super.dispose();
@@ -371,10 +376,28 @@ class _RenewalScreenState extends State<RenewalScreen> with WidgetsBindingObserv
     }
   }
 
+  static String _two(int n) => n.toString().padLeft(2, '0');
+
+  Widget _numDrop(String label, int value, List<int> items, String Function(int) text, void Function(int) onChanged) {
+    return Expanded(
+      child: DropdownButtonFormField<int>(
+        value: items.contains(value) ? value : null,
+        isExpanded: true,
+        decoration: InputDecoration(labelText: label, border: const OutlineInputBorder(), isDense: true),
+        items: [for (final i in items) DropdownMenuItem<int>(value: i, child: Text(text(i)))],
+        onChanged: (v) {
+          if (v != null) setState(() => onChanged(v));
+        },
+      ),
+    );
+  }
+
   Future<void> _submitManual() async {
     final payer = _payerCtl.text.trim();
     final last4 = enDigits(_last4Ctl.text).trim();
-    final paidAt = enDigits(_paidAtCtl.text).trim();
+    final gDate = jalaliToGregorian(_payJy, _payJm, _payJd);
+    final whenDt = DateTime(gDate.year, gDate.month, gDate.day, _payHour, _payMin);
+    final paidAt = '$_payJy/${_two(_payJm)}/${_two(_payJd)} ${_two(_payHour)}:${_two(_payMin)}';
     final amount = enDigits(_amountCtl.text).trim();
     final track = enDigits(_trackCtl.text).trim();
     String? v;
@@ -382,8 +405,10 @@ class _RenewalScreenState extends State<RenewalScreen> with WidgetsBindingObserv
       v = 'نام پرداخت‌کننده را وارد کنید';
     } else if (!RegExp(r'^\d{4}$').hasMatch(last4)) {
       v = 'ارقام آخر کارت باید ۴ رقم باشد';
-    } else if (paidAt.isEmpty) {
-      v = 'تاریخ و ساعت پرداخت را وارد کنید';
+    } else if (whenDt.isAfter(DateTime.now().add(const Duration(minutes: 10)))) {
+      v = 'زمان پرداخت نمی‌تواند در آینده باشد';
+    } else if (whenDt.isBefore(DateTime.now().subtract(const Duration(days: 30)))) {
+      v = 'زمان پرداخت خیلی قدیمی است؛ با پشتیبانی تماس بگیرید';
     } else if (!RegExp(r'^\d+$').hasMatch(amount) || int.parse(amount) <= 0) {
       v = 'مبلغ واریزی را درست وارد کنید';
     }
@@ -416,7 +441,6 @@ class _RenewalScreenState extends State<RenewalScreen> with WidgetsBindingObserv
       _method = null;
       _payerCtl.clear();
       _last4Ctl.clear();
-      _paidAtCtl.clear();
       _trackCtl.clear();
       _notice = '${d['message'] ?? 'اطلاعات پرداخت ثبت شد. بعد از بررسی ادمین اشتراک شما فعال می‌شود.'}';
       await _refreshInfo();
@@ -789,11 +813,30 @@ class _RenewalScreenState extends State<RenewalScreen> with WidgetsBindingObserv
           decoration: const InputDecoration(labelText: '۴ رقم آخر کارتی که با آن پرداخت کرده‌اید', border: OutlineInputBorder()),
         ),
         const SizedBox(height: 8),
-        TextField(
-          controller: _paidAtCtl,
-          maxLength: 20,
-          decoration: const InputDecoration(labelText: 'تاریخ و ساعت پرداخت', hintText: 'مثلاً ۱۴۰۵/۰۷/۲۶ ۱۴:۰۵', border: OutlineInputBorder()),
+        const Align(
+          alignment: Alignment.centerRight,
+          child: Text('تاریخ پرداخت (شمسی)', style: TextStyle(fontSize: 12.5, color: Colors.black54)),
         ),
+        const SizedBox(height: 4),
+        Row(children: [
+          _numDrop('روز', _payJd, List.generate(daysInJalaliMonth(_payJy, _payJm), (i) => i + 1),
+              (i) => toFaDigits('$i'), (v) => _payJd = v),
+          const SizedBox(width: 6),
+          _numDrop('ماه', _payJm, List.generate(12, (i) => i + 1), (i) => kJalaliMonthNames[i - 1], (v) {
+            _payJm = v;
+            final maxD = daysInJalaliMonth(_payJy, v);
+            if (_payJd > maxD) _payJd = maxD;
+          }),
+          const SizedBox(width: 6),
+          _numDrop('سال', _payJy, [for (var y = _todayJ[0] - 1; y <= _todayJ[0]; y++) y],
+              (i) => toFaDigits('$i'), (v) => _payJy = v),
+        ]),
+        const SizedBox(height: 8),
+        Row(children: [
+          _numDrop('ساعت', _payHour, List.generate(24, (i) => i), (i) => toFaDigits(_two(i)), (v) => _payHour = v),
+          const SizedBox(width: 6),
+          _numDrop('دقیقه', _payMin, List.generate(60, (i) => i), (i) => toFaDigits(_two(i)), (v) => _payMin = v),
+        ]),
         const SizedBox(height: 8),
         TextField(
           controller: _amountCtl,
