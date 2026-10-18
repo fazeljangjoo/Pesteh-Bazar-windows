@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'renewal_screen.dart';
 import 'sync_screen.dart';
 import 'license_gate_screen.dart' show ContactButtons;
 import 'license_service.dart';
@@ -257,6 +258,15 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                     textAlign: TextAlign.center),
                 const SizedBox(height: 12),
                 ContactButtons(phoneForMessage: r?.phone),
+                const SizedBox(height: 12),
+                FilledButton.icon(
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => RenewalScreen(onDone: _refresh)),
+                  ),
+                  icon: const Icon(Icons.payments_outlined),
+                  label: const Text('تمدید / خرید اشتراک'),
+                ),
                 const SizedBox(height: 24),
                 sectionTitle(context, 'نام و رمز عبور'),
                 _accountCard(),
