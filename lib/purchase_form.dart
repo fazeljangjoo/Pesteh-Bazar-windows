@@ -56,6 +56,8 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
 
   final _seller = TextEditingController();
   final _note = TextEditingController();
+  final _laborCost = TextEditingController(); // هزینه کارگر (اختیاری؛ از سود این پسته کم می‌شود)
+  final _transportCost = TextEditingController(); // هزینه حمل‌ونقل / باسکول (اختیاری)
 
   bool get _isEdit => widget.existing != null;
 
@@ -99,6 +101,8 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
       _pctCrooked.text = e['pct_crooked'] == null ? '' : plain(e['pct_crooked'] as num);
       _seller.text = (e['seller'] as String?) ?? '';
       _note.text = (e['note'] as String?) ?? '';
+    _laborCost.text = e['labor_cost'] == null ? '' : plain(e['labor_cost'] as num);
+    _transportCost.text = e['transport_cost'] == null ? '' : plain(e['transport_cost'] as num);
       final specs = AppDb.decodeCustomSpecs(e['custom_specs'] as String?);
       for (final s in specs) {
         final row = _CustomSpecRow();
@@ -300,6 +304,8 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
         if (_fx) 'usd_rate': parseNum(_usdRate.text),
         'seller': _seller.text.trim().isEmpty ? null : _seller.text.trim(),
         'note': _note.text.trim().isEmpty ? null : _note.text.trim(),
+        'labor_cost': parseNum(_laborCost.text),
+        'transport_cost': parseNum(_transportCost.text),
       };
       final okLocked = await saveConfirmed(
         context,
@@ -380,6 +386,8 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
           : null,
       'seller': _seller.text.trim().isEmpty ? null : _seller.text.trim(),
       'note': _note.text.trim().isEmpty ? null : _note.text.trim(),
+        'labor_cost': parseNum(_laborCost.text),
+        'transport_cost': parseNum(_transportCost.text),
     };
 
     setState(() => _saving = true);
@@ -584,6 +592,8 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
             sectionTitle(context, 'سایر'),
             PartyField(controller: _seller, label: 'فروشنده (اختیاری)'),
             textField(_note, 'توضیحات (اختیاری)', lines: 2),
+            numField(_laborCost, 'هزینه کارگر (تومان) — اختیاری', thousands: true, hint: 'اگر وارد شود از سود این پسته کم می‌شود'),
+            numField(_transportCost, 'هزینه حمل‌ونقل / باسکول (تومان) — اختیاری', thousands: true, hint: 'اگر وارد شود از سود این پسته کم می‌شود'),
             const SizedBox(height: 8),
             FilledButton.icon(
               onPressed: _saving ? null : _save,

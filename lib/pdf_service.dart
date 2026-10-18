@@ -410,7 +410,8 @@ class PdfService {
             decoration: pw.BoxDecoration(border: pw.Border.all(width: 0.5), borderRadius: pw.BorderRadius.circular(6)),
             child: pw.Column(children: [
               _kv('وزن کل (ناخالص - با گونی)', '${faNum(totalWeight)} کیلو'),
-              _kv('گونی کوچک / بزرگ', '${faNum(smallSacks)} / ${faNum(largeSacks)}'),
+              _kv('گونی کوچک', faNum(smallSacks)),
+              _kv('گونی بزرگ', faNum(largeSacks)),
               _kv('وزن پسته (خالص)', '${faNum(netWeight)} کیلو'),
             ]),
           ),

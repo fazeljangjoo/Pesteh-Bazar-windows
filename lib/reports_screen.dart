@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'charts.dart';
 import 'db.dart';
 import 'license_service.dart';
+import 'profit_lock.dart';
 import 'pdf_output.dart';
 import 'pdf_service.dart';
 import 'utils.dart';
@@ -20,6 +21,29 @@ class _ReportsScreenState extends State<ReportsScreen> {
   DateTime? _to;
   String _q = ''; // جستجوی کد پسته در گزارش سود
   bool _chartUsd = false; // نمایش نمودار به دلار (فقط پلن ارزی)
+  bool _lockChecked = false; // قفل صفحهٔ سود و زیان
+  bool _unlocked = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkLock();
+  }
+
+  @override
+  void dispose() {
+    ProfitLock.I.lockNow(); // با خروج از صفحه، دفعهٔ بعد دوباره رمز می‌خواهد (حریم خصوصی)
+    super.dispose();
+  }
+
+  Future<void> _checkLock() async {
+    final enabled = await ProfitLock.I.isEnabled();
+    if (!mounted) return;
+    setState(() {
+      _lockChecked = true;
+      _unlocked = !enabled || ProfitLock.I.recentlyUnlocked;
+    });
+  }
   int _chartMode = 0; // 0 = میله‌ای (سود در طول زمان) | 1 = کروی (سهم هر نوع پسته از سود)
 
   /// بازهٔ مؤثر گزارش سود: اگر کاربر تاریخی انتخاب نکرده باشد، ماه جاری شمسی
@@ -162,8 +186,26 @@ class _ReportsScreenState extends State<ReportsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('گزارش سود و زیان')),
-      body: ValueListenableBuilder<int>(
+      appBar: AppBar(
+        title: const Text('گزارش سود و زیان'),
+        actions: [
+          IconButton(
+            tooltip: 'قفل صفحهٔ سود و زیان',
+            icon: Icon(_unlocked && _lockChecked ? Icons.lock_open_outlined : Icons.lock_outline),
+            onPressed: !_unlocked
+                ? null
+                : () async {
+                    await showProfitLockSettings(context);
+                    if (mounted) setState(() {});
+                  },
+          ),
+        ],
+      ),
+      body: !_lockChecked
+          ? const Center(child: CircularProgressIndicator())
+          : !_unlocked
+              ? ProfitLockPad(onUnlocked: () => setState(() => _unlocked = true))
+              : ValueListenableBuilder<int>(
         valueListenable: AppDb.I.version,
         builder: (_, __, ___) => FutureBuilder<List<Map<String, dynamic>>>(
           future: AppDb.I.sales(),
@@ -216,11 +258,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 final key = '${it['category_name']} - ${baseT.isNotEmpty ? baseT : it['type_name']}';
                 final w = (it['weight'] as num).toDouble();
                 final rev = w * (sale['price'] as num).toDouble();
-                final cost = w * (it['cost_price'] as num).toDouble();
+                final extraCost = w * purchaseExtraPerKg(it as Map<String, dynamic>) + saleExtraShare(sale, it);
+                final cost = w * (it['cost_price'] as num).toDouble() + extraCost;
                 byType[key] = (byType[key] ?? 0) + (rev - cost);
                 final sdt = DateTime.parse(sale['date'] as String);
                 final double? profitU = (saleU != null && saleRate > 0)
-                    ? (rev / saleRate) - w * (it['cost_price_usd'] as num).toDouble()
+                    ? (rev / saleRate) - w * (it['cost_price_usd'] as num).toDouble() - extraCost / saleRate
                     : null;
                 if (profitU != null) byTypeUsd[key] = (byTypeUsd[key] ?? 0) + profitU;
                 for (var bi = 0; bi < buckets.length; bi++) {
@@ -234,8 +277,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
               final net = (sale['net_weight'] as num).toDouble();
               final price = (sale['price'] as num).toDouble();
               final revenue = net * price;
-              final cost = items.fold<double>(
-                  0, (a, it) => a + (it['weight'] as num) * (it['cost_price'] as num));
+              final cost = saleItemsCost(sale) + saleExtraCosts(sale); // بهای خرید + هزینه‌های کارگر و حمل‌ونقل/باسکول
               final profit = revenue - cost;
               totalRevenue += revenue;
               totalCost += cost;
@@ -265,11 +307,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
                       Text(comp),
                       const SizedBox(height: 8),
                       infoRow('مبلغ فروش', '${faNum(revenue, dec: 0)} تومان'),
-                      infoRow('بهای خرید', '${faNum(cost, dec: 0)} تومان'),
+                      infoRow('بهای خرید و هزینه‌ها', '${faNum(cost, dec: 0)} تومان'),
+                      if (saleExtraCosts(sale) > 0)
+                        infoRow('هزینه‌های ثبت‌شده در فروش (کارگر / حمل‌ونقل)', '${faNum(saleExtraCosts(sale), dec: 0)} تومان'),
                       infoRow('سود / زیان', '${faNum(profit, dec: 0)} تومان'),
                       if (fx && usd != null) ...[
                         infoRow('مبلغ فروش (دلار)', faUsd(usd.revenue)),
-                        infoRow('بهای خرید (دلار)', faUsd(usd.cost)),
+                        infoRow('بهای خرید و هزینه‌ها (دلار)', faUsd(usd.cost)),
                         infoRow('سود / زیان دلاری', faUsd(usd.profit),
                             valueColor: usd.profit >= 0 ? Colors.green.shade800 : scheme.error),
                       ] else if (fx)
@@ -335,7 +379,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     padding: const EdgeInsets.all(12),
                     child: Column(children: [
                       infoRow('مجموع فروش', '${faNum(totalRevenue, dec: 0)} تومان'),
-                      infoRow('مجموع بهای خرید', '${faNum(totalCost, dec: 0)} تومان'),
+                      infoRow('مجموع بهای خرید و هزینه‌ها', '${faNum(totalCost, dec: 0)} تومان'),
                       if (totalGain > 0)
                         infoRow('مجموع سود اجناس سودده', '${faNum(totalGain, dec: 0)} تومان', valueColor: kGainColor),
                       if (totalLoss < 0)
@@ -345,7 +389,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                       if (fx) ...[
                         const Divider(),
                         infoRow('مجموع فروش (دلار)', faUsd(usdRevenue)),
-                        infoRow('مجموع بهای خرید (دلار)', faUsd(usdCost)),
+                        infoRow('مجموع بهای خرید و هزینه‌ها (دلار)', faUsd(usdCost)),
                         infoRow('مجموع سود / زیان دلاری', faUsd(usdRevenue - usdCost),
                             valueColor: (usdRevenue - usdCost) >= 0 ? Colors.green.shade800 : scheme.error),
                         if (usdMissing > 0)

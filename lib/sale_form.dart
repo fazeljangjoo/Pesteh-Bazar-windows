@@ -64,6 +64,8 @@ class _SaleFormState extends State<SaleForm> with EditGuard<SaleForm> {
   final _usdRate = TextEditingController(); // قیمت دلار هنگام فروش (فقط پلن ارزی)
   final _buyer = TextEditingController();
   final _note = TextEditingController();
+  final _laborCost = TextEditingController(); // هزینه کارگر (اختیاری؛ از سود این فروش کم می‌شود)
+  final _transportCost = TextEditingController(); // هزینه حمل‌ونقل / باسکول (اختیاری)
 
   bool get _isEdit => widget.editSaleId != null;
 
@@ -82,6 +84,8 @@ class _SaleFormState extends State<SaleForm> with EditGuard<SaleForm> {
     _usdRate.dispose();
     _buyer.dispose();
     _note.dispose();
+    _laborCost.dispose();
+    _transportCost.dispose();
     super.dispose();
   }
 
@@ -109,6 +113,8 @@ class _SaleFormState extends State<SaleForm> with EditGuard<SaleForm> {
         _large.text = large == 0 ? '' : plain(large);
         _buyer.text = (sale['buyer'] as String?) ?? '';
         _note.text = (sale['note'] as String?) ?? '';
+    _laborCost.text = sale['labor_cost'] == null ? '' : plain(sale['labor_cost'] as num);
+    _transportCost.text = sale['transport_cost'] == null ? '' : plain(sale['transport_cost'] as num);
       }
     } else {
       l = await AppDb.I.lots();
@@ -250,6 +256,8 @@ class _SaleFormState extends State<SaleForm> with EditGuard<SaleForm> {
       'net_weight': net,
       'buyer': _buyer.text.trim().isEmpty ? null : _buyer.text.trim(),
       'note': _note.text.trim().isEmpty ? null : _note.text.trim(),
+      'labor_cost': parseNum(_laborCost.text),
+      'transport_cost': parseNum(_transportCost.text),
     };
 
     setState(() => _saving = true);
@@ -358,6 +366,12 @@ class _SaleFormState extends State<SaleForm> with EditGuard<SaleForm> {
     w.add(KeyedSubtree(
         key: const ValueKey('buyer'), child: PartyField(controller: _buyer, label: 'خریدار (اختیاری)')));
     w.add(KeyedSubtree(key: const ValueKey('note'), child: textField(_note, 'توضیحات (اختیاری)', lines: 2)));
+    w.add(KeyedSubtree(
+        key: const ValueKey('laborCost'),
+        child: numField(_laborCost, 'هزینه کارگر (تومان) — اختیاری', thousands: true, hint: 'اگر وارد شود از سود این فروش کم می‌شود')));
+    w.add(KeyedSubtree(
+        key: const ValueKey('transportCost'),
+        child: numField(_transportCost, 'هزینه حمل‌ونقل / باسکول (تومان) — اختیاری', thousands: true, hint: 'اگر وارد شود از سود این فروش کم می‌شود')));
     w.add(FilledButton.icon(
       onPressed: _saving ? null : _save,
       icon: _saving
@@ -464,15 +478,6 @@ class _SaleFormState extends State<SaleForm> with EditGuard<SaleForm> {
           if (_fx && _salePerKgUsd != null) ...[
             infoRow('فی فروش به دلار (هر کیلو)', faUsd(_salePerKgUsd!, dec: 4)),
             infoRow('مبلغ فروش به دلار', faUsd(_net * _salePerKgUsd!)),
-            if (_costPerKgUsd != null)
-              infoRow('سود دلاریِ تقریبی', faUsd(_net * (_salePerKgUsd! - _costPerKgUsd!)),
-                  valueColor: (_salePerKgUsd! - _costPerKgUsd!) >= 0 ? Colors.green.shade800 : scheme.error)
-            else
-              const Padding(
-                padding: EdgeInsets.only(top: 4),
-                child: Text('فی دلاریِ خرید این پسته ثبت نشده (قبل از پلن ارزی خریداری شده)؛ سود دلاری محاسبه نمی‌شود.',
-                    style: TextStyle(fontSize: 12)),
-              ),
           ],
           if (tooHeavy)
             Padding(

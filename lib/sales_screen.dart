@@ -90,9 +90,7 @@ class _SalesScreenState extends State<SalesScreen> {
                 final tare = total - net < 0 ? 0.0 : total - net;
                 final small = (sale['small_sack_count'] as num).toDouble();
                 final large = (sale['large_sack_count'] as num).toDouble();
-                final sackCounts = (small + large) > 0
-                    ? '  (${faNum(small)} کوچک / ${faNum(large)} بزرگ)'
-                    : '';
+                final sackCounts = '';
                 final comp = items
                     .map((it) => '${it['category_name']} - ${it['type_name']}')
                     .join(' + ');
@@ -152,24 +150,20 @@ class _SalesScreenState extends State<SalesScreen> {
                         infoRow('کد پسته', _codeOf(sale)),
                         const SizedBox(height: 8),
                         infoRow('وزن کل (ناخالص - با گونی)', '${faNum(total)} کیلو'),
-                        infoRow('وزن گونی‌ها', '${faNum(tare)} کیلو$sackCounts'),
+                        infoRow('وزن گونی‌ها', '${faNum(tare)} کیلو'),
+                        if (small + large > 0) ...[
+                          infoRow('گونی کوچک', faNum(small)),
+                          infoRow('گونی بزرگ', faNum(large)),
+                        ],
+                        if (sale['labor_cost'] != null) infoRow('هزینه کارگر', '${faNum(sale['labor_cost'] as num, dec: 0)} تومان'),
+                        if (sale['transport_cost'] != null) infoRow('هزینه حمل‌ونقل / باسکول', '${faNum(sale['transport_cost'] as num, dec: 0)} تومان'),
                         infoRow('وزن پسته (خالص)', '${faNum(net)} کیلو'),
                         infoRow('فی فروش', '${faNum(price, dec: 0)} تومان'),
                         infoRow('مبلغ فروش', '${faNum(revenue, dec: 0)} تومان'),
                         if (fx) ...[
                           if (rate != null) infoRow('قیمت دلار روز فروش', '${faNum(rate, dec: 0)} تومان'),
                           if (rate != null) infoRow('فی فروش به دلار', faUsd(price / rate, dec: 4)),
-                          if (usd != null) ...[
-                            infoRow('مبلغ فروش به دلار', faUsd(usd.revenue)),
-                            infoRow('بهای خرید به دلار', faUsd(usd.cost)),
-                            infoRow('سود دلاری', faUsd(usd.profit),
-                                valueColor: usd.profit >= 0 ? Colors.green.shade800 : Theme.of(context).colorScheme.error),
-                          ] else
-                            const Padding(
-                              padding: EdgeInsets.only(top: 4),
-                              child: Text('سود دلاری: قیمت دلار فروش یا فی دلاریِ خرید ثبت نشده',
-                                  style: TextStyle(fontSize: 12, color: Colors.black54)),
-                            ),
+                          if (usd != null) infoRow('مبلغ فروش به دلار', faUsd(usd.revenue)),
                         ],
                         const SizedBox(height: 8),
                         Wrap(spacing: 8, runSpacing: 8, children: [

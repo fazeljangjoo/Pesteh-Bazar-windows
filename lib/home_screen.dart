@@ -4,6 +4,7 @@ import 'sync_screen.dart';
 import 'sync_service.dart';
 import 'db.dart';
 import 'license_service.dart';
+import 'messages_card.dart';
 import 'dues_screen.dart';
 import 'ledger.dart';
 import 'purchase_form.dart';
@@ -42,34 +43,22 @@ class HomeScreen extends StatelessWidget {
             final now = DateTime.now();
             final startOfMonth = DateTime(now.year, now.month, 1);
 
-            double invKg = 0, invValue = 0;
+            double invKg = 0;
             for (final l in lots) {
-              final rem = (l['remaining'] as num).toDouble();
-              invKg += rem;
-              invValue += rem * (l['price'] as num).toDouble();
+              invKg += (l['remaining'] as num).toDouble();
             }
 
-            double todayRevenue = 0, monthRevenue = 0, monthProfit = 0, monthProfitUsd = 0;
-            final fx = LicenseService.I.isFx.value;
+            // حریم خصوصی: در صفحهٔ اصلی فقط مقدارِ فروش (کیلوگرم) و موجودی دیده می‌شود؛ سود و زیان فقط در صفحهٔ «سود و زیان» (قابل قفل)
+            double todayKg = 0, monthKg = 0;
             int todayCount = 0;
             for (final s in sales) {
               final date = DateTime.parse(s['date'] as String);
               final net = (s['net_weight'] as num).toDouble();
-              final price = (s['price'] as num).toDouble();
-              final revenue = net * price;
-              final items = s['items'] as List;
-              final cost = items.fold<double>(
-                  0, (a, it) => a + (it['weight'] as num) * (it['cost_price'] as num));
               if (_sameDay(date, now)) {
-                todayRevenue += revenue;
+                todayKg += net;
                 todayCount++;
               }
-              if (!date.isBefore(startOfMonth)) {
-                monthRevenue += revenue;
-                monthProfit += revenue - cost;
-                final u = fx ? saleUsd(s) : null;
-                if (u != null) monthProfitUsd += u.profit;
-              }
+              if (!date.isBefore(startOfMonth)) monthKg += net;
             }
 
             final overdue = dues.where((d) => daysUntil(d.date) < 0).toList();
@@ -81,43 +70,30 @@ class HomeScreen extends StatelessWidget {
             return ListView(
               padding: const EdgeInsets.all(16),
               children: [
+                const MessagesCard(),
                 _quickActions(context),
                 const SizedBox(height: 16),
-                sectionTitle(context, 'امروز'),
+                // موجودی انبار: درشت و پررنگ
                 Card(
                   color: scheme.primaryContainer,
                   child: Padding(
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 14),
                     child: Column(children: [
-                      infoRow('فروش امروز', '${faNum(todayCount)} مورد'),
-                      infoRow('مبلغ فروش امروز', '${faNum(todayRevenue, dec: 0)} تومان'),
+                      Text('موجودی انبار (خالص)', style: Theme.of(context).textTheme.titleMedium),
+                      const SizedBox(height: 6),
+                      Text('${faNum(invKg)} کیلو',
+                          style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w800)),
                     ]),
                   ),
                 ),
                 const SizedBox(height: 12),
-                sectionTitle(context, 'این ماه'),
+                sectionTitle(context, 'فروش'),
                 Card(
                   child: Padding(
                     padding: const EdgeInsets.all(12),
                     child: Column(children: [
-                      infoRow('مبلغ فروش ماه', '${faNum(monthRevenue, dec: 0)} تومان'),
-                      infoRow('سود ماه', '${faNum(monthProfit, dec: 0)} تومان',
-                          valueColor:
-                              monthProfit >= 0 ? Colors.green.shade800 : scheme.error),
-                      if (fx)
-                        infoRow('سود دلاری ماه', faUsd(monthProfitUsd),
-                            valueColor: monthProfitUsd >= 0 ? Colors.green.shade800 : scheme.error),
-                    ]),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                sectionTitle(context, 'موجودی انبار'),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Column(children: [
-                      infoRow('وزن موجودی (خالص)', '${faNum(invKg)} کیلو'),
-                      infoRow('ارزش خرید موجودی', '${faNum(invValue, dec: 0)} تومان'),
+                      infoRow('فروش امروز', '${faNum(todayCount)} مورد • ${faNum(todayKg)} کیلو (خالص)'),
+                      infoRow('فروش این ماه', '${faNum(monthKg)} کیلو (خالص)'),
                     ]),
                   ),
                 ),
@@ -131,7 +107,9 @@ class HomeScreen extends StatelessWidget {
                       padding: const EdgeInsets.all(12),
                       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                         Row(children: [
-                          Expanded(child: sectionTitle(context, 'سررسیدها')),
+                          Expanded(
+                              child: Text('سررسیدها',
+                                  style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800))),
                           const Icon(Icons.chevron_left),
                         ]),
                         if (overdue.isEmpty && soon.isEmpty)

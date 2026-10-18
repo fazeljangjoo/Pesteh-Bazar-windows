@@ -246,19 +246,60 @@ Uint8List photoBytes(String dataUrl) {
 /// مبلغ دلاری (پلن ارزی) با جداکننده هزارگان و ارقام فارسی
 String faUsd(num v, {int dec = 2}) => '${faNum(v, dec: dec)} دلار';
 
+double _numOf(dynamic v) => (v as num?)?.toDouble() ?? 0;
+
+/// هزینهٔ جانبیِ هر کیلو از یک خرید (کارگر + حمل‌ونقل/باسکولِ ثبت‌شده در خرید ÷ وزن خالص همان خرید)
+double purchaseExtraPerKg(Map<String, dynamic> item) {
+  final net = _numOf(item['p_net_weight']);
+  if (net <= 0) return 0;
+  return (_numOf(item['p_labor_cost']) + _numOf(item['p_transport_cost'])) / net;
+}
+
+/// هزینهٔ جانبیِ ثبت‌شده در خودِ فروش (کارگر + حمل‌ونقل/باسکول)
+double saleExtraCosts(Map<String, dynamic> sale) => _numOf(sale['labor_cost']) + _numOf(sale['transport_cost']);
+
+/// بهای تمام‌شدهٔ اقلامِ یک فروش به تومان: (فی خرید + هزینهٔ جانبیِ خرید به‌ازای کیلو) × وزن
+double saleItemsCost(Map<String, dynamic> sale) {
+  var c = 0.0;
+  for (final it in (sale['items'] as List)) {
+    final m = it as Map<String, dynamic>;
+    c += _numOf(m['weight']) * (_numOf(m['cost_price']) + purchaseExtraPerKg(m));
+  }
+  return c;
+}
+
+/// سود/زیان خالص یک فروش به تومان = مبلغ فروش − بهای تمام‌شده − هزینه‌های جانبیِ خرید و فروش
+double saleProfit(Map<String, dynamic> sale) =>
+    _numOf(sale['net_weight']) * _numOf(sale['price']) - saleItemsCost(sale) - saleExtraCosts(sale);
+
+/// سهمِ یک قلمِ فروش از هزینه‌های جانبیِ خودِ فروش (به نسبت وزن)
+double saleExtraShare(Map<String, dynamic> sale, Map<String, dynamic> item) {
+  var totalW = 0.0;
+  for (final it in (sale['items'] as List)) {
+    totalW += _numOf((it as Map)['weight']);
+  }
+  if (totalW <= 0) return 0;
+  return saleExtraCosts(sale) * _numOf(item['weight']) / totalW;
+}
+
 /// درآمد، بها و سود دلاریِ یک فروش (پلن ارزی).
 ///  * درآمد دلاری = (وزن خالص × فی فروش تومانی) ÷ قیمت دلارِ روز فروش
 ///  * بهای دلاری = وزن × فی دلاریِ خریدِ همان پسته (در مخلوط: میانگین وزنیِ مبدأها)
+///  * هزینه‌های جانبی (کارگر، حمل‌ونقل/باسکول) تومانی‌اند و با قیمت دلارِ روز فروش به دلار تبدیل و از سود کم می‌شوند
 /// اگر قیمت دلار فروش یا فی دلاریِ خرید ثبت نشده باشد (مثلاً خرید قبل از ارتقای پلن) null برمی‌گرداند.
 ({double revenue, double cost, double profit})? saleUsd(Map<String, dynamic> sale) {
   final rate = (sale['usd_rate'] as num?)?.toDouble();
   if (rate == null || rate <= 0) return null;
   var cost = 0.0;
+  var extraToman = saleExtraCosts(sale);
   for (final it in (sale['items'] as List)) {
     final cu = (it['cost_price_usd'] as num?)?.toDouble();
     if (cu == null) return null;
-    cost += (it['weight'] as num).toDouble() * cu;
+    final w = (it['weight'] as num).toDouble();
+    cost += w * cu;
+    extraToman += w * purchaseExtraPerKg(it as Map<String, dynamic>);
   }
+  cost += extraToman / rate;
   final revenue = (sale['net_weight'] as num).toDouble() * (sale['price'] as num).toDouble() / rate;
   return (revenue: revenue, cost: cost, profit: revenue - cost);
 }

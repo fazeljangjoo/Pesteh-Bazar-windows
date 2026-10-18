@@ -26,7 +26,7 @@ const List<(String, List<String>)> _kSnapshot = [
       'small_sack_count', 'large_sack_count', 'small_sacks_remaining', 'large_sacks_remaining',
       'net_weight', 'remaining', 'gram', 'pct_dombest',
       'pct_tuchin', 'pct_crooked', 'pct_khandan', 'custom_specs', 'photo', 'seller', 'note',
-      'is_mix', 'created_at', 'usd_rate', 'price_usd', 'waste', 'base_type'
+      'is_mix', 'created_at', 'usd_rate', 'price_usd', 'waste', 'base_type', 'labor_cost', 'transport_cost'
     ]
   ),
   ('mix_sources', ['id', 'mix_purchase_id', 'source_purchase_id', 'weight', 'small_sacks', 'large_sacks']),
@@ -50,7 +50,7 @@ const List<(String, List<String>)> _kSnapshot = [
     'sales',
     [
       'id', 'date', 'price', 'total_weight', 'small_sack_count', 'large_sack_count', 'net_weight',
-      'buyer', 'note', 'created_at', 'usd_rate'
+      'buyer', 'note', 'created_at', 'usd_rate', 'labor_cost', 'transport_cost'
     ]
   ),
   ('sale_items', ['id', 'sale_id', 'purchase_id', 'weight', 'item_price', 'small_sacks', 'large_sacks']),
@@ -110,7 +110,7 @@ const String _pSel = 'p.id, p.code, p.category_id, p.type_name, p.date, p.ounce,
     'p.small_sack_count, p.large_sack_count, p.small_sacks_remaining, p.large_sacks_remaining, '
     'p.net_weight, p.remaining, p.gram, p.pct_dombest, '
     'p.pct_tuchin, p.pct_crooked, p.pct_khandan, p.custom_specs, p.seller, p.note, p.is_mix, '
-    'p.usd_rate, p.price_usd, p.waste, p.base_type, p.created_at, p.ord, (p.photo IS NOT NULL OR p.photo_pending = 1) AS has_photo';
+    'p.usd_rate, p.price_usd, p.waste, p.base_type, p.labor_cost, p.transport_cost, p.created_at, p.ord, (p.photo IS NOT NULL OR p.photo_pending = 1) AS has_photo';
 
 class _SaleV {
   final Map<String, dynamic> row;
@@ -134,7 +134,7 @@ class AppDb {
   /// با هر تغییر داده زیاد می‌شود تا صفحه‌ها بازخوانی شوند
   final ValueNotifier<int> version = ValueNotifier<int>(0);
 
-  static const int schemaVersion = 12;
+  static const int schemaVersion = 13;
 
   String? _phone;
   Database? _db;
@@ -227,6 +227,13 @@ class AppDb {
       // سررسید/اقساط قرض + نوع زیردستهٔ مخلوط/جداسازی (برای نمودارهای دقیق‌تر)
       await _createLoanTables(d);
       await d.execute('ALTER TABLE purchases ADD COLUMN base_type TEXT');
+    }
+    if (oldV < 13) {
+      // هزینه کارگر و هزینه حمل‌ونقل/باسکول (خرید و فروش) — از سود همان پسته کم می‌شود
+      for (final t in ['purchases', 'sales']) {
+        await d.execute('ALTER TABLE $t ADD COLUMN labor_cost REAL');
+        await d.execute('ALTER TABLE $t ADD COLUMN transport_cost REAL');
+      }
     }
   }
 
@@ -322,6 +329,8 @@ class AppDb {
         price_usd REAL,
         waste REAL,
         base_type TEXT,
+        labor_cost REAL,
+        transport_cost REAL,
         ord INTEGER NOT NULL DEFAULT 0
       )''');
     await d.execute('''
@@ -391,6 +400,8 @@ class AppDb {
         note TEXT,
         created_at TEXT,
         usd_rate REAL,
+        labor_cost REAL,
+        transport_cost REAL,
         ord INTEGER NOT NULL DEFAULT 0
       )''');
     await d.execute('''
@@ -1109,11 +1120,21 @@ class AppDb {
       'custom_specs': specsJson,
       'seller': _s(p['seller'], 150),
       'note': _s(p['note'], 500),
+      'labor_cost': _cost(p['labor_cost']),
+      'transport_cost': _cost(p['transport_cost']),
     };
   }
 
   /// قیمت دلار. فرم‌های پلن ریالی هیچ‌وقت این فیلد را نمی‌فرستند، پس رکورد جدید null می‌ماند؛
   /// ولی در ویرایش، مقدار قدیمیِ ذخیره‌شده (از merged) دست‌نخورده حفظ می‌شود.
+  /// هزینهٔ جانبی (کارگر / حمل‌ونقل-باسکول): خالی = null، منفی یا بیش‌ازحد = خطا
+  double? _cost(dynamic raw) {
+    final v = _nn(raw);
+    if (v == null || v == 0) return null;
+    if (v < 0 || v > 1e13) throw Exception('مبلغ هزینه نامعتبر است');
+    return _r(v, 2);
+  }
+
   double? _usdRate(dynamic raw) {
     final u = _nn(raw);
     if (u == null) return null;
@@ -1147,6 +1168,8 @@ class AppDb {
       'seller': v['seller'],
       'note': v['note'],
       'usd_rate': v['usd_rate'],
+      'labor_cost': v['labor_cost'],
+      'transport_cost': v['transport_cost'],
     };
   }
 
@@ -2182,7 +2205,7 @@ class AppDb {
     for (final s in rows) {
       final items = await d.rawQuery('''
         SELECT si.weight, si.item_price, si.small_sacks, si.large_sacks, si.purchase_id AS purchase_id,
-               p.code AS code, p.price AS cost_price, p.price_usd AS cost_price_usd, p.type_name AS type_name, p.base_type AS base_type, c.name AS category_name
+               p.code AS code, p.price AS cost_price, p.price_usd AS cost_price_usd, p.type_name AS type_name, p.base_type AS base_type, p.labor_cost AS p_labor_cost, p.transport_cost AS p_transport_cost, p.net_weight AS p_net_weight, c.name AS category_name
         FROM sale_items si
         JOIN purchases p ON p.id = si.purchase_id
         JOIN categories c ON c.id = p.category_id
@@ -2279,6 +2302,8 @@ class AppDb {
     final buyer = _s(sale['buyer'], 150);
     final note = _s(sale['note'], 500);
     final usdRate = _usdRate(sale['usd_rate']); // قیمت دلار هنگام فروش (پلن ارزی)
+    final laborCost = _cost(sale['labor_cost']);
+    final transportCost = _cost(sale['transport_cost']);
     final row = <String, dynamic>{
       'usd_rate': usdRate,
       'date': date,
@@ -2289,6 +2314,8 @@ class AppDb {
       'net_weight': net,
       'buyer': buyer,
       'note': note,
+      'labor_cost': laborCost,
+      'transport_cost': transportCost,
     };
     final payload = <String, dynamic>{
       'usd_rate': usdRate,
@@ -2299,6 +2326,8 @@ class AppDb {
       'large_sack_count': _r(large, 2),
       'buyer': buyer,
       'note': note,
+      'labor_cost': laborCost,
+      'transport_cost': transportCost,
       'items': norm,
     };
     return _SaleV(row, payload, norm);

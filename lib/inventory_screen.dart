@@ -61,8 +61,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
               if (l['waste'] != null && (l['waste'] as num) > 0)
                 infoRow('ضایعات/خاک', '${faNum(l['waste'] as num)} کیلو'),
               infoRow('مانده فعلی (خالص)', '${faNum(rem)} کیلو'),
-              infoRow('گونی مانده: کوچک / بزرگ',
-                  '${faNum((l['small_left'] as num?) ?? 0)} / ${faNum((l['large_left'] as num?) ?? 0)}'),
+              infoRow('گونی کوچک مانده', faNum((l['small_left'] as num?) ?? 0)),
+              infoRow('گونی بزرگ مانده', faNum((l['large_left'] as num?) ?? 0)),
               if (l['ounce'] != null) infoRow('انس', faNum(l['ounce'] as num)),
               if (l['gram'] != null) infoRow('گرم', faNum(l['gram'] as num)),
               if (l['note'] != null && (l['note'] as String).isNotEmpty)
@@ -228,7 +228,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
                     infoRow('مجموع موجودی (خالص)', '${faNum(totalKg)} کیلو'),
                     infoRow('ارزش خرید موجودی', '${faNum(totalValue, dec: 0)} تومان'),
                     infoRow('تعداد گونی کل', '${faNum(totalSmall + totalLarge)} عدد'),
-                    infoRow('گونی کوچک / بزرگ', '${faNum(totalSmall)} / ${faNum(totalLarge)}'),
+                    infoRow('گونی کوچک', faNum(totalSmall)),
+                    infoRow('گونی بزرگ', faNum(totalLarge)),
                     if (_showMixed && totalWaste > 0.0005)
                       infoRow('مجموع ضایعات ثبت‌شده', '${faNum(totalWaste)} کیلو'),
                   ]),
