@@ -4,6 +4,7 @@ import 'sync_screen.dart';
 import 'sync_service.dart';
 import 'db.dart';
 import 'license_service.dart';
+import 'assistant_screen.dart';
 import 'messages_card.dart';
 import 'dues_screen.dart';
 import 'ledger.dart';
@@ -72,6 +73,35 @@ class HomeScreen extends StatelessWidget {
               children: [
                 const MessagesCard(),
                 _quickActions(context),
+                // دستیار: فقط برای کاربر پلن fx دیده می‌شود (isFx از ورود/بوت ذخیره می‌شود)
+                ValueListenableBuilder<bool>(
+                  valueListenable: LicenseService.I.isFx,
+                  builder: (context, fx, _) => !fx
+                      ? const SizedBox.shrink()
+                      : Padding(
+                          padding: const EdgeInsets.only(top: 12),
+                          child: InkWell(
+                            onTap: () => Navigator.push(context,
+                                MaterialPageRoute(builder: (_) => const AssistantScreen())),
+                            child: Card(
+                              color: scheme.secondaryContainer,
+                              child: Padding(
+                                padding: const EdgeInsets.all(14),
+                                child: Row(children: [
+                                  const Icon(Icons.smart_toy_outlined),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Text('دستیار پسته بازار',
+                                        style: Theme.of(context).textTheme.titleMedium
+                                            ?.copyWith(fontWeight: FontWeight.w700)),
+                                  ),
+                                  const Icon(Icons.chevron_left),
+                                ]),
+                              ),
+                            ),
+                          ),
+                        ),
+                ),
                 const SizedBox(height: 16),
                 // موجودی انبار: درشت و پررنگ
                 Card(
