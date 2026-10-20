@@ -200,9 +200,11 @@ class SyncService {
         break;
       case 'payments.save':
         await one('purchase_id', 'pur');
+        await _addSnap(o);
         break;
       case 'receipts.save':
         await one('sale_id', 'sale');
+        await _addSnap(o);
         break;
       case 'sales.create':
         await list('items', 'purchase_id', 'pur');
@@ -231,6 +233,13 @@ class SyncService {
       if (j is Map<String, dynamic>) data = j;
     } catch (_) {}
     return _ApiResult(resp.statusCode, data);
+  }
+
+  /// STAGE12: آخرین snap_at (ساعت سرور در آخرین دریافتِ اعمال‌شده) را به ثبت پرداخت/دریافت می‌افزاید.
+  /// اگر نباشد (سرور قدیمی یا هنوز دریافت اعمال‌نشده) چیزی نمی‌فرستد ⇒ رفتار قبلی.
+  Future<void> _addSnap(Map<String, dynamic> o) async {
+    final s = await AppDb.I.metaGet('snap_at');
+    if (s != null && s.isNotEmpty) o['snap_at'] = s;
   }
 
   /// true = صف کاملاً پردازش شد (یا فقط موارد خطادار مانده)؛ false = باید بعداً دوباره تلاش شود
@@ -321,7 +330,10 @@ class SyncService {
     // ویندوز: قبل از جایگزینی داده‌های محلی با داده‌های سرور یک نسخهٔ محلی می‌گیریم (برگشت‌پذیری)
     await LocalBackup.I.snapshot(discardQueue ? 'pre-reload' : 'pre-sync',
         minGap: discardQueue ? Duration.zero : const Duration(hours: 6));
-    return AppDb.I.replaceAllFromServer(Map<String, dynamic>.from(tables), discardQueue: discardQueue);
+    // STAGE12: exported_at = ساعت سرور همین خروجی؛ فقط در صورت اعمال واقعی به‌عنوان snap_at ذخیره می‌شود
+    final exp = r.data!['exported_at'];
+    return AppDb.I.replaceAllFromServer(Map<String, dynamic>.from(tables),
+        discardQueue: discardQueue, exportedAt: exp is String ? exp : null);
   }
 
   /// ورود روی این دستگاه (یا نصب مجدد): همهٔ داده‌های حساب را از سرور می‌آورد.

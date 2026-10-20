@@ -833,7 +833,8 @@ class AppDb {
   /// [discardQueue]=false: اگر همزمان عملیاتی در صف باشد (کاربر حین دریافت چیزی ثبت کرده)
   /// چیزی جایگزین نمی‌شود و false برمی‌گردد تا هیچ تغییر محلی گم نشود.
   /// [discardQueue]=true: صف (شامل خطاها) دور ریخته می‌شود و سرور مرجع قرار می‌گیرد.
-  Future<bool> replaceAllFromServer(Map<String, dynamic> tables, {bool discardQueue = false}) async {
+  Future<bool> replaceAllFromServer(Map<String, dynamic> tables,
+      {bool discardQueue = false, String? exportedAt}) async {
     // تا وقتی فرم/صفحهٔ ثبتی باز است، داده‌ها زیر دست کاربر عوض نمی‌شوند (دریافت بعداً انجام می‌شود)
     if (!discardQueue && isEditing) return false;
     final d = await db;
@@ -941,6 +942,14 @@ class AppDb {
       await t.insert('meta', {'k': 'initial_done', 'v': '1'}, conflictAlgorithm: ConflictAlgorithm.replace);
       await t.insert('meta', {'k': 'last_pull', 'v': DateTime.now().toIso8601String()},
           conflictAlgorithm: ConflictAlgorithm.replace);
+      // STAGE12: ساعت سرور همین دریافتِ اعمال‌شده ⇒ snap_at (برای ادغام تسویهٔ دستیار در سرور).
+      // فقط داخل همین تراکنش و بعد از اعمال واقعی. بدون exported_at (سرور قدیمی) متای قبلی پاک می‌شود
+      // تا snap_at کهنه فرستاده نشود (سرور آن را پنجرهٔ legacy حساب می‌کند).
+      if (exportedAt != null && exportedAt.isNotEmpty && exportedAt.length <= 40) {
+        await t.insert('meta', {'k': 'snap_at', 'v': exportedAt}, conflictAlgorithm: ConflictAlgorithm.replace);
+      } else {
+        await t.delete('meta', where: "k='snap_at'");
+      }
       applied = true;
     });
     if (applied) version.value++;
@@ -2695,7 +2704,11 @@ class AppDb {
               'created_at': _stamp(),
             });
             await _enqueue(t, 'loans.create',
-                {'uid': uid, 'party': party, 'kind': repayKind, 'amount': amt, 'date': dt, 'note': nt},
+                {
+                  'uid': uid, 'party': party, 'kind': repayKind, 'amount': amt, 'date': dt, 'note': nt,
+                  // STAGE12: اگر سرور همین سررسید را قبلاً (دستیار/وب) تسویه کرده، ردیف موجود برمی‌گردد (بدون دوبل)
+                  'due_ref': {'loan_uid': due['loan_uid'], 'seq': due['seq']},
+                },
                 refKind: 'loan', refId: rid);
           }
           await _confirm(t, 'SELECT 1 FROM loan_dues WHERE id = ? AND paid = 1', [dueId]);
