@@ -20,6 +20,7 @@ dependencies:
   http: ^1.2.2
   shared_preferences: ^2.3.2
   url_launcher: ^6.3.1
+  barcode_widget: ^2.0.4
   # --- نسخهٔ ویندوز ---
   sqflite_common_ffi: ^2.4.2   # SQLite روی دسکتاپ (همان دیتابیس و کدِ گوشی)
   ed25519_edwards: ^0.3.1      # تأیید امضای مجوز اشتراک
