@@ -42,6 +42,9 @@ class _SendIntent extends Intent {
 
 const AssistantAction _rootAction = AssistantAction('menu');
 
+/// سقف طول پرسش از پسته‌کاو (هم‌راستا با متن راهنمای فرم در سرور).
+const int _textMaxChars = 500;
+
 // ---------------------------------------------------------------- کمک‌های ساده
 
 String _s(dynamic v) => v == null ? '' : v.toString();
@@ -148,6 +151,10 @@ class _AssistantScreenState extends State<AssistantScreen> {
   bool _closing = false;
   int _seq = 0;
   int _renderId = 0;
+  // اکشنی که الان منتظر پاسخ سرور است (برای نشان دادن حالت «در حال بررسی»)
+  AssistantAction? _inFlight;
+  // حباب پاسخ پسته‌کاو؛ بعد از رسیدن پاسخ، صفحه روی همین حباب می‌رود
+  final GlobalKey _answerKey = GlobalKey();
 
   @override
   void initState() {
@@ -184,7 +191,10 @@ class _AssistantScreenState extends State<AssistantScreen> {
 
   Future<AssistantResult> _navigate(AssistantAction a, _Mode mode, {bool? quietErrors}) async {
     final seq = ++_seq;
-    if (mounted) setState(() => _busy = true);
+    if (mounted) setState(() {
+      _busy = true;
+      _inFlight = a;
+    });
     final res = await AssistantApi.call(a.q, step: a.step, params: a.params);
     if (!mounted) return res;
     if (res.authExpired) {
@@ -198,6 +208,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
       final t = data['title'];
       setState(() {
         _busy = false;
+        _inFlight = null;
         _loadError = null;
         if (mode == _Mode.push) _stack.add(_current);
         if (mode == _Mode.back && _stack.isNotEmpty) _stack.removeLast();
@@ -207,10 +218,17 @@ class _AssistantScreenState extends State<AssistantScreen> {
         _title = t is String && t.isNotEmpty ? t : 'دستیار پسته بازار';
         _renderId++;
       });
+      if (a.q == 'ai_ask' && a.step == 'answer') {
+        // بعد از ساخته شدن صفحهٔ تازه، به حباب پاسخ اسکرول کن
+        WidgetsBinding.instance.addPostFrameCallback((_) => _revealAnswer());
+      }
       return res;
     }
 
-    setState(() => _busy = false);
+    setState(() {
+      _busy = false;
+      _inFlight = null;
+    });
     if (_data == null) {
       setState(() {
         _loadError = res.message;
@@ -229,6 +247,28 @@ class _AssistantScreenState extends State<AssistantScreen> {
     return res;
   }
 
+  /// بعد از پاسخ پسته‌کاو، صفحه را روی حباب پاسخ می‌برد (نه ته صفحه، که فرم و دکمه‌ها هستند).
+  void _revealAnswer() {
+    final ctx = _answerKey.currentContext;
+    if (!mounted || ctx == null) return;
+    Scrollable.ensureVisible(
+      ctx,
+      duration: const Duration(milliseconds: 250),
+      alignment: 0.0,
+    );
+  }
+
+  /// اندیس آخرین بلوک متن دستیار (نه پرسش کاربر)؛ اگر نبود -1.
+  int _lastAssistantTextIndex(List<dynamic> blocks) {
+    for (var i = blocks.length - 1; i >= 0; i--) {
+      final raw = blocks[i];
+      if (raw is Map && raw['type'] == 'text' && raw['role'] != 'user' && raw['role'] != 'support') {
+        return i;
+      }
+    }
+    return -1;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -239,6 +279,15 @@ class _AssistantScreenState extends State<AssistantScreen> {
       body: Column(
         children: [
           if (_busy) const LinearProgressIndicator(minHeight: 2),
+          if (_inFlight?.q == 'ai_ask' && _inFlight?.step == 'answer')
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Text(
+                'پسته‌کاو در حال بررسی است…',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
           Expanded(child: _buildBody(context)),
         ],
       ),
@@ -281,14 +330,16 @@ class _AssistantScreenState extends State<AssistantScreen> {
   }
 
   Widget _messageList(Map<String, dynamic> data, List<dynamic> blocks, String note) {
+    final answerIdx = _lastAssistantTextIndex(blocks);
     return ListView(
       key: ValueKey(_renderId), // با هر صفحهٔ تازه، وضعیت بلوک‌ها (مثلاً چت) از نو ساخته می‌شود
       padding: const EdgeInsets.all(16),
       children: [
-        for (final raw in blocks)
+        for (var i = 0; i < blocks.length; i++)
           Padding(
+            key: i == answerIdx ? _answerKey : null,
             padding: const EdgeInsets.only(bottom: 12),
-            child: _renderBlock(raw),
+            child: _renderBlock(blocks[i]),
           ),
         if (note.isNotEmpty)
           Text(
@@ -664,6 +715,14 @@ class _FormBlockState extends State<_FormBlock> {
     });
   }
 
+  bool _isText(Map<String, dynamic> f) => _s(f['kind']) == 'text';
+
+  /// ارسال از کیبورد (فقط فیلد متن)؛ اگر در حال ارسال باشیم یا اکشنی نباشد، کاری نمی‌کند.
+  void _submitFromKeyboard(AssistantAction? action) {
+    if (action == null || _submitting) return;
+    _submit(action);
+  }
+
   Future<void> _submit(AssistantAction action) async {
     setState(() {
       _submitting = true;
@@ -737,11 +796,35 @@ class _FormBlockState extends State<_FormBlock> {
                           for (final f in _fields)
                             SizedBox(
                               width: w,
-                              child: TextField(
+                              child: Shortcuts(
+                                // ویندوز: Enter = ارسال (فقط فیلد متن)؛ Shift+Enter = خط جدید
+                                shortcuts: _isText(f)
+                                    ? const <ShortcutActivator, Intent>{
+                                        SingleActivator(LogicalKeyboardKey.enter): _SendIntent(),
+                                        SingleActivator(LogicalKeyboardKey.numpadEnter): _SendIntent(),
+                                      }
+                                    : const <ShortcutActivator, Intent>{},
+                                child: Actions(
+                                  actions: <Type, Action<Intent>>{
+                                    _SendIntent: CallbackAction<Intent>(onInvoke: (_) {
+                                      _submitFromKeyboard(submitAction);
+                                      return null;
+                                    }),
+                                  },
+                                  child: TextField(
                                 controller: _rows[i].ctrls[_s(f['name'])],
-                                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                autocorrect: false,
-                                enableSuggestions: false,
+                                // در حالت انتظار پاسخ سرور، فیلد قفل می‌شود
+                                enabled: !_submitting,
+                                // kind:'text' = متن آزاد چندخطی (پرسش از پسته‌کاو)؛ بقیه عددی‌اند
+                                keyboardType: _isText(f)
+                                    ? TextInputType.multiline
+                                    : const TextInputType.numberWithOptions(decimal: true),
+                                maxLines: _isText(f) ? 4 : 1,
+                                maxLength: _isText(f) ? _textMaxChars : null,
+                                // ارسال با دکمهٔ «ارسال» کیبورد (برای متن) به‌جای خط جدید
+                                textInputAction: _isText(f) ? TextInputAction.send : null,
+                                autocorrect: _isText(f),
+                                enableSuggestions: _isText(f),
                                 decoration: InputDecoration(
                                   labelText: _s(f['label']).isEmpty ? _s(f['name']) : _s(f['label']),
                                   helperText: _s(f['hint']).isEmpty ? null : _s(f['hint']),
@@ -750,6 +833,8 @@ class _FormBlockState extends State<_FormBlock> {
                                   border: const OutlineInputBorder(),
                                 ),
                               ),
+                                ),
+                              )
                             ),
                         ],
                       );

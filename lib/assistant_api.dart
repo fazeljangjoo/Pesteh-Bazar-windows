@@ -45,12 +45,19 @@ class AssistantApi {
 
   static const Duration _timeout = Duration(seconds: 20);
 
+  /// پرسش از پسته‌کاو (مدل هوش مصنوعی) کندتر است؛ timeout بلندتر فقط برای همین عمل.
+  static const Duration _aiTimeout = Duration(seconds: 60);
+
   /// [q] نام اکشن (menu, stock_total, …)؛ [step] start | answer | send | poll؛ [params] اختیاری.
+  /// [timeout] اختیاری است؛ اگر نشود، برای `ai_ask/answer` ۶۰ ثانیه و در بقیهٔ موارد ۲۰ ثانیه است.
   static Future<AssistantResult> call(
     String q, {
     String step = 'start',
     Map<String, dynamic>? params,
+    Duration? timeout,
   }) async {
+    final effectiveTimeout =
+        timeout ?? (q == 'ai_ask' && step == 'answer' ? _aiTimeout : _timeout);
     final cred = await LicenseService.I.credentials();
     if (cred == null) {
       return AssistantResult.failure('نیاز به ورود مجدد است', authExpired: true);
@@ -71,7 +78,7 @@ class AssistantApi {
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode(body),
           )
-          .timeout(_timeout);
+          .timeout(effectiveTimeout);
     } on TimeoutException {
       return AssistantResult.failure(
         'سرور در زمان مناسب پاسخ نداد. اینترنت را بررسی کنید و دوباره تلاش کنید.',

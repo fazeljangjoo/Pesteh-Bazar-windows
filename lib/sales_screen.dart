@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'barcode_utils.dart';
 import 'db.dart';
 import 'invoice_service.dart';
 import 'license_service.dart';
@@ -148,6 +149,7 @@ class _SalesScreenState extends State<SalesScreen> {
                         ]),
                         Text(comp),
                         infoRow('کد پسته', _codeOf(sale)),
+                        for (final c in printableCodesIn(_codeOf(sale))) BarcodeBox(c, height: 44),
                         const SizedBox(height: 8),
                         infoRow('وزن کل (ناخالص - با گونی)', '${faNum(total)} کیلو'),
                         infoRow('وزن گونی‌ها', '${faNum(tare)} کیلو'),

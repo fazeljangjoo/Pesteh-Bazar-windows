@@ -6,6 +6,8 @@ import 'package:path/path.dart';
 import 'db_crypto.dart';
 import 'package:sqflite/sqflite.dart';
 
+import 'barcode_utils.dart';
+
 
 const List<String> kPresetTypesNormal = ['اکبری', 'احمدآقایی', 'فندقی', 'کله‌قوچی'];
 const List<String> kPresetTypesKernel = ['مغز کال', 'مغز درجه یک', 'مغز درجه دو'];
@@ -1350,6 +1352,20 @@ class AppDb {
           AND (p.code LIKE ? OR p.type_name LIKE ? OR c.name LIKE ?)
         ORDER BY c.name, p.type_name, p.id''', ['%$q%', '%$q%', '%$q%']);
     return _withSacksLeft(d, rows);
+  }
+
+  Future<Map<String, dynamic>?> lotByCode(String raw) async {
+    final code = normalizeScan(raw);
+    if (code == null) return null;
+    final d = await db;
+    final rows = await d.rawQuery('''
+        SELECT $_pSel, c.name AS category_name, c.preset_key AS category_preset
+        FROM purchases p JOIN categories c ON c.id = p.category_id
+        WHERE p.code = ?
+        LIMIT 1''', [code]);
+    if (rows.isEmpty) return null;
+    final out = await _withMixInfo(d, await _withSacksLeft(d, rows));
+    return out.isEmpty ? null : out.first;
   }
 
   /// برای هر ردیف: آیا مقداری از آن هنوز داخل مخلوطی است که کامل فروش نرفته؟

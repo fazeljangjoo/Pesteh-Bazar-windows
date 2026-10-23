@@ -9,7 +9,9 @@ import 'messages_card.dart';
 import 'dues_screen.dart';
 import 'ledger.dart';
 import 'purchase_form.dart';
+import 'purchases_screen.dart';
 import 'sale_form.dart';
+import 'scan_entry.dart';
 import 'utils.dart';
 import 'widgets.dart';
 
@@ -73,6 +75,12 @@ class HomeScreen extends StatelessWidget {
               children: [
                 const MessagesCard(),
                 _quickActions(context),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: () => _scanAndOpen(context),
+                  icon: const Icon(Icons.qr_code_scanner),
+                  label: const Text('اسکن بارکد'),
+                ),
                 // دستیار: فقط برای کاربر پلن fx دیده می‌شود (isFx از ورود/بوت ذخیره می‌شود)
                 ValueListenableBuilder<bool>(
                   valueListenable: LicenseService.I.isFx,
@@ -196,6 +204,19 @@ class HomeScreen extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  /// اسکن → پیدا کردن همان پسته در حساب → باز کردن جزئیاتش در صفحهٔ خرید
+  Future<void> _scanAndOpen(BuildContext context) async {
+    final code = await scanBarcode(context);
+    if (code == null || !context.mounted) return;
+    final lot = await AppDb.I.lotByCode(code);
+    if (!context.mounted) return;
+    if (lot == null) {
+      snack(context, 'این کد در حساب شما نیست');
+      return;
+    }
+    Navigator.push(context, MaterialPageRoute(builder: (_) => PurchasesScreen(openCode: code)));
   }
 
   Widget _quickActions(BuildContext context) {

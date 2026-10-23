@@ -8,17 +8,22 @@ import 'pdf_output.dart';
 import 'pdf_service.dart';
 import 'purchase_form.dart';
 import 'notify_service.dart';
+import 'barcode_utils.dart';
 import 'utils.dart';
 import 'widgets.dart';
 
 class PurchasesScreen extends StatefulWidget {
-  const PurchasesScreen({super.key});
+  /// اگر از اسکن آمده باشیم، جزئیات همین کد یک‌بار باز می‌شود
+  const PurchasesScreen({super.key, this.openCode});
+
+  final String? openCode;
   @override
   State<PurchasesScreen> createState() => _PurchasesScreenState();
 }
 
 class _PurchasesScreenState extends State<PurchasesScreen> {
   String _query = '';
+  bool _openedCode = false;
 
   void _details(BuildContext context, Map<String, dynamic> p) {
     String? pct(String k) => p[k] == null ? null : '${faNum(p[k] as num)}٪';
@@ -65,6 +70,7 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                   style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 8),
                     infoRow('کد پسته', p['code'] as String? ?? '-'),
+              BarcodeBox(p['code'] as String? ?? ''),
               if (((p['has_photo'] as num?) ?? 0) == 1)
                 FutureBuilder<String?>(
                   future: AppDb.I.localPhoto(p['id'] as int),
@@ -221,6 +227,16 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
             builder: (context, s) {
               if (!s.hasData) return const Center(child: CircularProgressIndicator());
               final all = s.data!;
+              // اسکن موفق: جزئیات همان پسته یک‌بار باز شود
+              if (widget.openCode != null && !_openedCode) {
+                _openedCode = true;
+                final hit = all.where((p) => p['code'] == widget.openCode).toList();
+                if (hit.isNotEmpty) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) _details(context, hit.first);
+                  });
+                }
+              }
               final q = _norm(_query);
               final filtered = q.isEmpty
                   ? all

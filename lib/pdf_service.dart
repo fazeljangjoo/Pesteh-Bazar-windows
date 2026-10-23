@@ -7,6 +7,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
+import 'barcode_utils.dart';
 import 'utils.dart';
 
 /// برچسب‌های جهت تراکنش که در جدول PDF نشان داده می‌شود
@@ -105,6 +106,11 @@ class PdfService {
           pw.Text('کارتکس انبار', style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold)),
           pw.Divider(),
           _kv('کد پسته', code, bold: true),
+          if (isPrintableCode(code)) ...[
+            pw.SizedBox(height: 6),
+            pw.Center(child: pdfBarcode(code)),
+          ] else
+            pdfBarcodeNote(),
           _kv('وزن کل (ناخالص)', '${faNum(totalWeight)} کیلو'),
           _kv('وزن پسته (خالص)', '${faNum(netWeight)} کیلو'),
           _kv('تعداد گونی', faNum(smallSacks + largeSacks)),
@@ -350,6 +356,7 @@ class PdfService {
     final unitUsd = (withUsd && usdRate != null && usdRate > 0) ? unitPrice / usdRate : null;
     final amountUsd = unitUsd == null ? null : netWeight * unitUsd;
 
+    final barcodes = printableCodesIn(code);
     final headers = <String>[
       'ردیف', 'دسته', 'نوع', 'کد پسته', 'وزن (خالص) کیلو', 'فی (تومان)', 'مبلغ (تومان)',
       if (withUsd) ...['فی (دلار)', 'مبلغ (دلار)'],
@@ -395,6 +402,15 @@ class PdfService {
             ]),
           ),
           pw.SizedBox(height: 14),
+          if (barcodes.isNotEmpty) ...[
+            pw.Wrap(
+              alignment: pw.WrapAlignment.center,
+              spacing: 12,
+              runSpacing: 6,
+              children: [for (final c in barcodes) pdfBarcode(c, height: 34, width: 130)],
+            ),
+            pw.SizedBox(height: 10),
+          ],
           pw.Table.fromTextArray(
             headers: headers.map(pdfText).toList(),
             data: [row.map(pdfText).toList()],

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'barcode_utils.dart';
 import 'charts.dart';
 import 'db.dart';
 import 'mix_form.dart';
@@ -41,6 +42,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
               Text('${l['category_name']} - ${l['type_name']}',
                   style: Theme.of(ctx).textTheme.titleMedium),
                 infoRow('کد پسته', l['code'] as String? ?? '-'),
+              BarcodeBox(l['code'] as String? ?? ''),
               const SizedBox(height: 4),
               const Text('اجناس مصرف‌شده در این مخلوط/جداسازی:',
                   style: TextStyle(color: Colors.black54)),
