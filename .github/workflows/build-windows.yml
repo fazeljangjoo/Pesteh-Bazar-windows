@@ -129,3 +129,4 @@ jobs:
           path: |
             dist/PestehBazar-Setup.exe
             dist/PestehBazar-Windows-portable.zip
+            retention-days: 1
