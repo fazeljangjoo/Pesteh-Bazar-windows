@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'sync_screen.dart';
 import 'sync_service.dart';
 import 'db.dart';
+import 'live_query.dart';
 import 'license_service.dart';
 import 'assistant_screen.dart';
 import 'messages_card.dart';
@@ -27,15 +28,14 @@ class HomeScreen extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(title: const Text('پسته بازار')),
-      body: ValueListenableBuilder<int>(
-        valueListenable: AppDb.I.version,
-        builder: (_, __, ___) => FutureBuilder(
-          future: Future.wait([
-            AppDb.I.lots(),
-            AppDb.I.sales(),
-            loadDues(),
-          ]),
-          builder: (context, snap) {
+      body: LiveQuery<List<Object?>>(
+        tab: 0,
+        load: () => Future.wait<Object?>([
+          AppDb.I.lots(),
+          AppDb.I.sales(),
+          loadDues(),
+        ]),
+        builder: (context, snap) {
             if (!snap.hasData) {
               return const Center(child: CircularProgressIndicator());
             }
@@ -201,7 +201,6 @@ class HomeScreen extends StatelessWidget {
               ],
             );
           },
-        ),
       ),
     );
   }

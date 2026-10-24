@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'db.dart';
+import 'live_query.dart';
 import 'ledger.dart';
 import 'notify_service.dart';
 import 'utils.dart';
@@ -68,11 +69,9 @@ class _DuesScreenState extends State<DuesScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('سررسیدها')),
-      body: ValueListenableBuilder<int>(
-        valueListenable: AppDb.I.version,
-        builder: (_, __, ___) => FutureBuilder<List<DueItem>>(
-          future: loadDues(),
-          builder: (context, snap) {
+      body: LiveQuery<List<DueItem>>(
+        load: loadDues,
+        builder: (context, snap) {
             if (snap.hasError) {
               return Center(child: Text('خطا: ${snap.error}'));
             }
@@ -148,7 +147,6 @@ class _DuesScreenState extends State<DuesScreen> {
               ],
             );
           },
-        ),
       ),
     );
   }

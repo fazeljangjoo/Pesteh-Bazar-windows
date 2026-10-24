@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'db.dart';
+import 'live_query.dart';
 import 'ledger.dart';
 import 'loans_ui.dart';
 import 'payment_screen.dart';
@@ -27,11 +28,9 @@ class _PartiesScreenState extends State<PartiesScreen> {
         icon: const Icon(Icons.person_add_alt_1),
         label: const Text('طرف‌حساب جدید'),
       ),
-      body: ValueListenableBuilder<int>(
-        valueListenable: AppDb.I.version,
-        builder: (_, __, ___) => FutureBuilder<List<PartyAccount>>(
-          future: loadParties(),
-          builder: (context, snap) {
+      body: LiveQuery<List<PartyAccount>>(
+        load: loadParties,
+        builder: (context, snap) {
             if (snap.hasError) return Center(child: Text('خطا: ${snap.error}'));
             if (!snap.hasData) return const Center(child: CircularProgressIndicator());
             final all = snap.data!;
@@ -105,7 +104,6 @@ class _PartiesScreenState extends State<PartiesScreen> {
               ],
             );
           },
-        ),
       ),
     );
   }

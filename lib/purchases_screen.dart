@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'db.dart';
+import 'live_query.dart';
 import 'invoice_service.dart';
 import 'license_service.dart';
 import 'payment_screen.dart';
@@ -220,11 +221,10 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
           icon: const Icon(Icons.add),
           label: const Text('خرید جدید'),
         ),
-        body: ValueListenableBuilder<int>(
-          valueListenable: AppDb.I.version,
-          builder: (_, __, ___) => FutureBuilder<List<Map<String, dynamic>>>(
-            future: AppDb.I.purchases(),
-            builder: (context, s) {
+        body: LiveQuery<List<Map<String, dynamic>>>(
+          tab: 1,
+          load: AppDb.I.purchases,
+          builder: (context, s) {
               if (!s.hasData) return const Center(child: CircularProgressIndicator());
               final all = s.data!;
               // اسکن موفق: جزئیات همان پسته یک‌بار باز شود
@@ -265,7 +265,6 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                 ),
               ]);
             },
-          ),
         ),
       ),
     );

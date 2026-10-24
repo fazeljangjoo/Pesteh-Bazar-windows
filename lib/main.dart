@@ -15,6 +15,7 @@ import 'dues_screen.dart';
 import 'home_screen.dart';
 import 'inventory_screen.dart';
 import 'license_gate_screen.dart';
+import 'live_query.dart';
 import 'notify_service.dart';
 import 'parties_screen.dart';
 import 'purchases_screen.dart';
@@ -112,7 +113,7 @@ class HomeShell extends StatefulWidget {
 }
 
 class _HomeShellState extends State<HomeShell> {
-  int _i = 0;
+  int _i = activeTab.value;
   final _scaffoldKey = GlobalKey<ScaffoldState>();
 
   static const _pages = [
@@ -203,7 +204,10 @@ class _HomeShellState extends State<HomeShell> {
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _i,
-        onDestinationSelected: (v) => setState(() => _i = v),
+        onDestinationSelected: (v) {
+          activeTab.value = v; // تب جدید در صورت نیاز داده‌هایش را تازه می‌کند
+          setState(() => _i = v);
+        },
         destinations: const [
           NavigationDestination(icon: Icon(Icons.home_outlined), label: 'خانه'),
           NavigationDestination(icon: Icon(Icons.shopping_cart_outlined), label: 'خرید'),

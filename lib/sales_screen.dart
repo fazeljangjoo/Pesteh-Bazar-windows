@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'barcode_utils.dart';
 import 'db.dart';
+import 'live_query.dart';
 import 'invoice_service.dart';
 import 'license_service.dart';
 import 'receipt_screen.dart';
@@ -47,11 +48,10 @@ class _SalesScreenState extends State<SalesScreen> {
         icon: const Icon(Icons.add),
         label: const Text('فروش جدید'),
       ),
-      body: ValueListenableBuilder<int>(
-        valueListenable: AppDb.I.version,
-        builder: (_, __, ___) => FutureBuilder<List<Map<String, dynamic>>>(
-          future: AppDb.I.sales(),
-          builder: (context, s) {
+      body: LiveQuery<List<Map<String, dynamic>>>(
+        tab: 2,
+        load: AppDb.I.sales,
+        builder: (context, s) {
             if (!s.hasData) return const Center(child: CircularProgressIndicator());
             final all = s.data!;
             if (all.isEmpty) return const Center(child: Text('هنوز فروشی ثبت نشده'));
@@ -197,7 +197,6 @@ class _SalesScreenState extends State<SalesScreen> {
               },
             );
           },
-        ),
       ),
     );
   }

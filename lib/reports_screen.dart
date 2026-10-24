@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'charts.dart';
 import 'db.dart';
+import 'live_query.dart';
 import 'license_service.dart';
 import 'profit_lock.dart';
 import 'pdf_output.dart';
@@ -205,11 +206,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
           ? const Center(child: CircularProgressIndicator())
           : !_unlocked
               ? ProfitLockPad(onUnlocked: () => setState(() => _unlocked = true))
-              : ValueListenableBuilder<int>(
-        valueListenable: AppDb.I.version,
-        builder: (_, __, ___) => FutureBuilder<List<Map<String, dynamic>>>(
-          future: AppDb.I.sales(),
-          builder: (context, s) {
+              : LiveQuery<List<Map<String, dynamic>>>(
+        load: AppDb.I.sales,
+        builder: (context, s) {
             if (!s.hasData) return const Center(child: CircularProgressIndicator());
             final scheme = Theme.of(context).colorScheme;
             final all = s.data!;
@@ -473,7 +472,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
               ],
             );
           },
-        ),
       ),
     );
   }

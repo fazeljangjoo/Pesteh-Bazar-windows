@@ -136,7 +136,7 @@ class AppDb {
   /// با هر تغییر داده زیاد می‌شود تا صفحه‌ها بازخوانی شوند
   final ValueNotifier<int> version = ValueNotifier<int>(0);
 
-  static const int schemaVersion = 13;
+  static const int schemaVersion = 14;
 
   String? _phone;
   Database? _db;
@@ -236,6 +236,31 @@ class AppDb {
         await d.execute('ALTER TABLE $t ADD COLUMN labor_cost REAL');
         await d.execute('ALTER TABLE $t ADD COLUMN transport_cost REAL');
       }
+    }
+    if (oldV < 14) {
+      // فقط ایندکس (بدون تغییر ستون/جدول) → فقط سرعت جستجو بیشتر می‌شود
+      await _createIndexes(d);
+    }
+  }
+
+  /// ایندکس ستون‌های کلید خارجی؛ بدون اینها هر `WHERE sale_id=?` کل جدول را اسکن می‌کرد.
+  /// `IF NOT EXISTS` است، پس اجرای دوباره بی‌خطر است. هیچ تأثیری روی سینک ندارد.
+  Future<void> _createIndexes(Database d) async {
+    const stmts = [
+      'CREATE INDEX IF NOT EXISTS ix_si_sale ON sale_items(sale_id)',
+      'CREATE INDEX IF NOT EXISTS ix_si_purchase ON sale_items(purchase_id)',
+      'CREATE INDEX IF NOT EXISTS ix_lump_pay ON lump_tx(payment_id)',
+      'CREATE INDEX IF NOT EXISTS ix_cred_pay ON credit_inst(payment_id)',
+      'CREATE INDEX IF NOT EXISTS ix_chq_pay ON cheque_inst(payment_id)',
+      'CREATE INDEX IF NOT EXISTS ix_rlump_rec ON receipt_lump_tx(receipt_id)',
+      'CREATE INDEX IF NOT EXISTS ix_rcred_rec ON receipt_credit_inst(receipt_id)',
+      'CREATE INDEX IF NOT EXISTS ix_rchq_rec ON receipt_cheque_inst(receipt_id)',
+      'CREATE INDEX IF NOT EXISTS ix_mix_src ON mix_sources(source_purchase_id)',
+      'CREATE INDEX IF NOT EXISTS ix_mix_mix ON mix_sources(mix_purchase_id)',
+      'CREATE INDEX IF NOT EXISTS ix_loan_dues_uid ON loan_dues(loan_uid)',
+    ];
+    for (final q in stmts) {
+      await d.execute(q);
     }
   }
 
@@ -487,6 +512,7 @@ class AppDb {
         PRIMARY KEY(kind, local_id)
       )''');
     await _createLoanTables(d);
+    await _createIndexes(d);
     // نکته: دسته‌ها و انواع پیش‌فرض را سرور می‌سازد (bootstrap) و هنگام ورود دریافت می‌شوند.
   }
 
@@ -2226,18 +2252,23 @@ class AppDb {
   Future<List<Map<String, dynamic>>> sales() async {
     final d = await db;
     final rows = await d.query('sales', orderBy: 'ord DESC, id DESC');
-    final out = <Map<String, dynamic>>[];
-    for (final s in rows) {
-      final items = await d.rawQuery('''
-        SELECT si.weight, si.item_price, si.small_sacks, si.large_sacks, si.purchase_id AS purchase_id,
+    // یک کوئری برای همهٔ اقلام (قبلاً برای هر فروش یک کوئری جدا بود)
+    final all = await d.rawQuery('''
+        SELECT si.sale_id AS _sid, si.weight, si.item_price, si.small_sacks, si.large_sacks, si.purchase_id AS purchase_id,
                p.code AS code, p.price AS cost_price, p.price_usd AS cost_price_usd, p.type_name AS type_name, p.base_type AS base_type, p.labor_cost AS p_labor_cost, p.transport_cost AS p_transport_cost, p.net_weight AS p_net_weight, c.name AS category_name
         FROM sale_items si
         JOIN purchases p ON p.id = si.purchase_id
         JOIN categories c ON c.id = p.category_id
-        WHERE si.sale_id = ?''', [s['id']]);
-      out.add({...s, 'items': items});
+        ORDER BY si.id''');
+    final bySale = <int, List<Map<String, dynamic>>>{};
+    for (final r in all) {
+      final m = Map<String, dynamic>.of(r);
+      final sid = (m.remove('_sid') as num).toInt();
+      (bySale[sid] ??= <Map<String, dynamic>>[]).add(m);
     }
-    return out;
+    return [
+      for (final s in rows) {...s, 'items': bySale[(s['id'] as num).toInt()] ?? <Map<String, dynamic>>[]},
+    ];
   }
 
   /// اقلام یک فروش (فروش‌های جدید همیشه یک قلم دارند؛ فروش‌های قدیمیِ چندقلمی ممکن است بیشتر داشته باشند)

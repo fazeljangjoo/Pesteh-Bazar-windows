@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'barcode_utils.dart';
 import 'charts.dart';
 import 'db.dart';
+import 'live_query.dart';
 import 'mix_form.dart';
 import 'pdf_output.dart';
 import 'pdf_service.dart';
@@ -156,11 +157,10 @@ class _InventoryScreenState extends State<InventoryScreen> {
         icon: const Icon(Icons.merge_type),
         label: const Text('مخلوط / جداسازی'),
       ),
-      body: ValueListenableBuilder<int>(
-        valueListenable: AppDb.I.version,
-        builder: (_, __, ___) => FutureBuilder<List<Map<String, dynamic>>>(
-          future: AppDb.I.inventoryAll(),
-          builder: (context, s) {
+      body: LiveQuery<List<Map<String, dynamic>>>(
+        tab: 3,
+        load: AppDb.I.inventoryAll,
+        builder: (context, s) {
             if (!s.hasData) return const Center(child: CircularProgressIndicator());
             final all = s.data!;
             if (all.isEmpty) return const Center(child: Text('انبار خالی است'));
@@ -335,7 +335,6 @@ class _InventoryScreenState extends State<InventoryScreen> {
             children.add(const SizedBox(height: 72));
             return ListView(padding: const EdgeInsets.all(12), children: children);
           },
-        ),
       ),
     );
   }
